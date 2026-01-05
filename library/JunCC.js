@@ -10,7 +10,11 @@ export class JunCC {
     }
 
     #size(data) {
-        return v8.serialize(data).length;
+        try {
+            return v8.serialize(data).length;
+        } catch (e) {
+            return 0;
+        }
     }
 
     set(key, data) {
@@ -54,10 +58,10 @@ export class JunCC {
 
     stats() {
         return {
-            used: (this.currentSize /
-                1024 / 1024).toFixed(2) + " MB",
-            limit: (this.limit /
-                1024 / 1024) + " MB",
+            used: (this.currentSize / 1024
+                / 1024).toFixed(2) + " MB",
+            limit: (this.limit / 1024
+                / 1024).toFixed(2) + " MB",
             items: this.cache.size
         };
     }

@@ -3,25 +3,44 @@
 import { Adapter } from "./JunAD.js";
 
 export class Index {
-    constructor(JunIO) {
+    constructor(JunIO, options = {}) {
         this.JunIO = JunIO;
-        this.data = this.JunIO.readSync(
-            'index.bin') || {};
+        this.data = this.JunIO
+            .readSync('index.bin') || {};
         this.data.$file = 'root.bin';
+
+        this._timer = null;
+        this._counter = 0;
+        this._limit = options.limit || 10;
+        this._delay = options.delay || 5000;
     }
 
-    save() {
-        this.JunIO.write(
-            'index.bin',
-            this.data);
+    save(force = false) {
+        this._counter++;
+
+        if (force || this._counter >= this._limit) {
+            if (this._timer) clearTimeout(this._timer);
+            this._timer = null;
+            this._counter = 0;
+            return this.JunIO.write(
+                'index.bin',
+                this.data);
+        }
+
+        if (this._timer)
+            clearTimeout(this._timer);
+        this._timer = setTimeout(() => {
+            this.save(true);
+        }, this._delay);
     }
 }
 
 export class Root {
-    constructor(JunIO, index) {
+    constructor(JunIO, index, depth = 2) {
         this.JunIO = JunIO;
         this.index = index;
-        this.Adater = new Adapter(JunIO);
+        this.Adater = new Adapter(
+            JunIO, depth);
     }
 
     get data() {
@@ -75,5 +94,9 @@ export class Root {
         delete this.data[key];
         this.JunIO.write(this.index
             .$file, this.data);
+    }
+
+    keys() {
+        return Object.keys(this.data);
     }
 }

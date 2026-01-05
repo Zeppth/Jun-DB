@@ -4,22 +4,26 @@ import { JunIO } from "./JunIO.js";
 import { Index, Root } from "./JunIR.js";
 
 export class JunDB {
-    constructor(o = {
-        folder: './data',
-        memoryLimit: 20
-    }) {
-        if (o?.constructor?.name !== 'Object') {
+    constructor(options = {}) {
+        if (options?.constructor?.name !== 'Object') {
             return new Error('Invalid options');
         }
 
         this.JunIO = new JunIO({
-            folder: './data',
-            memoryLimit: 20,
-            ...o
+            folder: options.folder || './data',
+            memoryLimit: options.memoryLimit || 20,
         });
 
-        this.index = new Index(this.JunIO);
+        this.index = new Index(this.JunIO, {
+            limit: options.saveLimit || 10,
+            delay: options.saveDelay || 5000
+        });
+
+        this.depth = options.depth || 2;
         this.proxies = new WeakMap();
+
+        this.memory = () => this.JunIO.RAM.stats()
+        this.flush = () => this.JunIO.flush()
     }
 
     get data() {
@@ -32,7 +36,9 @@ export class JunDB {
         if (this.proxies.has(index))
             return this.proxies.get(index);
 
-        const root = new Root(this.JunIO, index);
+        const root = new Root(this.JunIO,
+            index, this.depth);
+
         const proxy = new Proxy({}, {
             get(target, key) {
                 if (typeof key === 'symbol')
@@ -59,12 +65,14 @@ export class JunDB {
                 return true;
             },
             ownKeys(target) {
-                return Reflect.ownKeys(target);
+                return root.keys();
             },
-            getOwnPropertyDescriptor(target, key) {
+
+            getOwnPropertyDescriptor(_, key) {
                 return {
                     enumerable: true,
-                    configurable: true
+                    configurable: true,
+                    value: root.get(key)
                 };
             }
         })
