@@ -3,7 +3,7 @@
 npm install https://github.com/Zeppth/Jun-DB.git
 ```
 ---
-```
+```js
 import { JunDB } from 'jun-db';
 
 const db = new JunDB({
