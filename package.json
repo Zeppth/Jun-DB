@@ -1,0 +1,27 @@
+{
+  "name": "jun-db",
+  "version": "1.0.0",
+  "description": "Minimalist, sharded binary database for Node.js. High-performance persistence through transparent Proxies and atomic I/O.",
+  "main": "index.js",
+  "type": "module",
+  "keywords": [
+    "database",
+    "binary-storage",
+    "sharding",
+    "v8-serialization",
+    "lru-cache",
+    "atomic-write",
+    "high-performance",
+    "proxy-database",
+    "jun-base"
+  ],
+  "author": "Zeppth",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Zeppth/Jun-DB.git"
+  }
+}
