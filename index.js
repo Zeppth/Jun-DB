@@ -1,8 +1,8 @@
 // index.js
 import { JunDB } from './library/JunDB.js';
-import { Adapter } from './library/JunAD.js';
+import { JunShard } from './library/JunShard.js';
 
 export {
     JunDB,
-    Adapter
+    JunShard
 }
