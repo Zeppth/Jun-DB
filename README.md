@@ -1,59 +1,328 @@
-**JunDB** es una base de datos embebida y basada en archivos para Node.js, orientada a la persistencia estructurada de objetos. Su diseño prioriza simplicidad, control explícito de recursos y persistencia incremental, evitando modelos monolíticos y cargas completas en memoria. La información se organiza jerárquicamente en nodos independientes, permitiendo mantener estados complejos sin depender de archivos únicos de gran tamaño.
+# JunDB
 
-Los datos se almacenan mediante serialización binaria y se fragmentan en unidades independientes vinculadas por un índice liviano. Las escrituras son localizadas y atómicas, preservando la integridad del estado y reduciendo el impacto en disco. El acceso se realiza de forma transparente mediante proxies, tratando la base como un objeto nativo, mientras la memoria se gestiona con un caché de límite definido para evitar crecimiento descontrolado.
-
-JunDB está pensada para estados persistentes bien organizados y no para alta concurrencia, consultas complejas ni grandes volúmenes de datos no estructurados. Su alcance es intencionalmente limitado para mantener claridad, previsibilidad y bajo nivel de complejidad.
+Base de datos embebida para Node.js. Persistencia binaria, fragmentada y jerárquica. Acceso transparente mediante proxies.
 
 ---
 
-## Arquitectura interna
+## Instalación
 
-JunDB se compone de un núcleo reducido de módulos con responsabilidades bien delimitadas. El almacenamiento físico es gestionado por un controlador de archivos que abstrae lectura, escritura atómica y eliminación, delegando el rendimiento final al sistema de archivos subyacente. Sobre este nivel se implementa un sistema de serialización binaria que permite persistir estructuras de datos complejas sin depender de formatos de texto.
+```bash
+npm install https://github.com/Zeppth/Jun-DB
+```
 
-La estructura lógica de los datos se mantiene mediante un índice liviano que describe la relación jerárquica entre nodos. Este índice no almacena datos en sí, sino referencias a fragmentos persistidos de forma independiente. Cada nodo puede resolverse de manera diferida, evitando cargas completas y permitiendo persistencia incremental.
-
-La fragmentación del estado se realiza mediante un mecanismo de sharding estructural. Los objetos se dividen en unidades autónomas que se almacenan como archivos binarios separados, organizados jerárquicamente en el sistema de archivos. Este enfoque reduce el impacto de escritura y facilita la gestión de estados complejos.
-
-El acceso a los datos se expone mediante proxies, lo que permite interceptar operaciones de lectura, escritura y eliminación sin introducir una API declarativa adicional. La base se comporta como un objeto JavaScript nativo, mientras internamente se controla la persistencia y la coherencia.
-
-La gestión de memoria se realiza mediante un caché con política de reemplazo y límite explícito. Los datos se cargan bajo demanda y se liberan cuando exceden el presupuesto definido, evitando crecimiento no controlado del uso de RAM.
+Requisitos: Node.js >= 18.0.0
 
 ---
 
-## Modelo mental de uso
+## Inicio rápido
 
-JunDB debe entenderse como un árbol persistente de objetos. Cada nivel de la estructura representa una frontera natural de persistencia, y el diseño de los datos influye directamente en el comportamiento del sistema. Una estructura bien definida permite accesos localizados y escrituras eficientes.
+```javascript
+import { JunDB } from 'jun-db';
 
-El desarrollador es responsable de decidir cómo se organiza el estado. JunDB no impone esquemas ni normalización automática. En su lugar, ofrece un mecanismo flexible que recompensa estructuras claras y penaliza concentraciones excesivas de datos en un solo nodo.
+const db = new JunDB({
+    folder: './storage',
+    memoryLimit: 20,
+    depth: 2
+});
 
-El uso correcto implica pensar en términos de estado y evolución, no en consultas ni en agregaciones complejas. JunDB es adecuada para mantener información viva y mutable que debe sobrevivir reinicios, no para análisis ni procesamiento masivo.
+// Escritura
+db.data.users = {
+    u001: { name: 'Ana', age: 28 },
+    u002: { name: 'Luis', age: 34 }
+};
+
+// Lectura
+console.log(db.data.users.u001.name); // 'Ana'
+
+// Modificación
+db.data.users.u001.age = 29;
+
+// Eliminación
+delete db.data.users.u002;
+
+// Forzar escritura a disco
+await db.flush();
+```
 
 ---
 
-## Decisiones de diseño
+## Configuración
 
-JunDB prioriza simplicidad y previsibilidad sobre generalidad. La ausencia de un lenguaje de consultas, transacciones complejas o ejecución distribuida es una decisión consciente para mantener un núcleo pequeño y fácil de razonar.
+```javascript
+const db = new JunDB({
+    folder: './storage',   // Directorio de almacenamiento
+    memoryLimit: 20,       // Límite de caché en MB
+    depth: 2,              // Profundidad de fragmentación (carpetas)
+    saveLimit: 10,         // Escrituras antes de persistir
+    saveDelay: 5000        // Delay máximo antes de persistir (ms)
+});
+```
 
-El uso de serialización binaria permite reducir sobrecarga y evitar conversiones innecesarias, a costa de depender del entorno de ejecución. La persistencia basada en archivos y escrituras atómicas busca maximizar la integridad de los datos sin introducir mecanismos complejos de recuperación.
-
-El modelo de un solo proceso evita la necesidad de sincronización externa y bloqueos entre escritores, alineándose con su naturaleza embebida. Estas decisiones definen claramente el alcance del proyecto y evitan ambigüedades sobre su propósito.
+| Opción | Tipo | Default | Descripción |
+|--------|------|---------|-------------|
+| `folder` | string | `'./data'` | Ruta del almacenamiento |
+| `memoryLimit` | number | `20` | MB máximos en caché |
+| `depth` | number | `2` | Niveles de subdirectorios para shards |
+| `saveLimit` | number | `10` | Operaciones antes de flush automático |
+| `saveDelay` | number | `5000` | Tiempo máximo (ms) antes de persistir |
 
 ---
 
-## API y configuración
+## API
 
-La API de JunDB es mínima y orientada al uso directo. La inicialización permite configurar la ubicación del almacenamiento, el límite de memoria y parámetros relacionados con la persistencia diferida. Una vez inicializada, la base se expone como un objeto raíz desde el cual se accede a toda la estructura de datos.
+### Acceso a datos
 
-Las operaciones de lectura, escritura y eliminación se realizan mediante acceso directo a propiedades. La persistencia ocurre de forma automática y transparente, sin requerir llamadas explícitas para guardar cambios. El sistema expone utilidades básicas para forzar la sincronización con disco y consultar el estado de la memoria.
+```javascript
+// Raíz de datos
+db.data
 
-La simplicidad de la API es intencional. No existen métodos para consultas avanzadas ni abstracciones adicionales que oculten el comportamiento real del almacenamiento.
+// Lectura
+const value = db.data.key;
+const nested = db.data.level1.level2.key;
+
+// Escritura
+db.data.key = value;
+db.data.newNode = { nested: { data: true } };
+
+// Eliminación
+delete db.data.key;
+
+// Iteración
+Object.keys(db.data.users);
+for (const key in db.data.users) { ... }
+```
+
+### Métodos
+
+```javascript
+// Forzar sincronización a disco
+await db.flush();
+
+// Estado de memoria
+db.memory();
+// { used: "2.45 MB", limit: "20.00 MB", items: 12 }
+
+// Abrir nodo específico (si existe)
+const users = db.open('users');
+if (users) {
+    console.log(users.u001);
+}
+```
+
+---
+
+## Estructuras de datos
+
+Los objetos se fragmentan automáticamente. Arrays y primitivos se almacenan inline.
+
+```javascript
+// Objeto → se fragmenta en archivo separado
+db.data.config = { theme: 'dark', lang: 'es' };
+
+// Array → se almacena completo en el nodo padre
+db.data.tags = ['a', 'b', 'c'];
+
+// Primitivos → inline
+db.data.count = 42;
+db.data.active = true;
+```
+
+### Estructura resultante en disco
+
+```
+storage/
+├── index.bin          # Índice de referencias
+├── root.bin           # Nodo raíz
+└── data/
+    └── A3/
+        └── A3F2B1C8.bin   # Nodo 'config'
+```
+
+---
+
+## JunFlow (Interceptores)
+
+Sistema de middleware para interceptar operaciones.
+
+```javascript
+// Definir interceptores
+db.flow.set('users', {
+    $proxy: {
+        get(target, key) {
+            console.log(`Leyendo: ${key}`);
+            // No llamar resolve/reject = comportamiento normal
+        },
+        set(target, key, value) {
+            if (key === 'admin') {
+                this.reject(new Error('No permitido'));
+                return;
+            }
+            // Continúa normalmente
+        },
+        delete(target, key) {
+            console.log(`Eliminando: ${key}`);
+        }
+    },
+    $call: {
+        // Métodos personalizados
+        count() {
+            return Object.keys(this.index).length;
+        },
+        find(predicate) {
+            for (const k in this.data) {
+                if (predicate(this.data[k])) return this.data[k];
+            }
+        }
+    }
+});
+
+// Uso
+db.data.users.count();
+db.data.users.find(u => u.age > 30);
+```
+
+### Contexto de interceptores
+
+```javascript
+$proxy: {
+    set(target, key, value) {
+        this.resolve(value);  // Retornar valor personalizado
+        this.reject(error);   // Lanzar error
+        this.open('path');    // Abrir subnodo
+        this.data;            // Valor recibido
+        this.index;           // Índice actual
+        this.flow;            // Configuración flow actual
+    }
+}
+
+$call: {
+    customMethod() {
+        this.data;    // Proxy actual
+        this.index;   // Índice
+        this.flow;    // Flow
+        this.open();  // Abrir subnodo
+        this.Jun;     // Instancia JunDB
+    }
+}
+```
+
+---
+
+## Ejemplos
+
+### Estado de aplicación
+
+```javascript
+const db = new JunDB({ folder: './state' });
+
+db.data.sessions = {};
+db.data.settings = { maxUsers: 100 };
+
+function createSession(userId, token) {
+    db.data.sessions[userId] = {
+        token,
+        createdAt: Date.now()
+    };
+}
+
+function getSession(userId) {
+    return db.data.sessions[userId];
+}
+```
+
+### Colección con métodos
+
+```javascript
+db.data.products = {};
+
+db.flow.set('products', {
+    $call: {
+        add(product) {
+            const id = crypto.randomUUID();
+            this.data[id] = { ...product, id };
+            return id;
+        },
+        list() {
+            return Object.values(this.data);
+        },
+        byCategory(cat) {
+            return this.list().filter(p => p.category === cat);
+        }
+    }
+});
+
+const id = db.data.products.add({ name: 'Item', price: 100 });
+const all = db.data.products.list();
+```
+
+### Validación en escritura
+
+```javascript
+db.flow.set('users', {
+    $proxy: {
+        set(target, key, value) {
+            if (!value.email || !value.name) {
+                this.reject(new Error('email y name requeridos'));
+            }
+        }
+    }
+});
+
+// Lanza error
+db.data.users.u001 = { name: 'Test' };
+
+// OK
+db.data.users.u001 = { name: 'Test', email: 'test@x.com' };
+```
+
+---
+
+## Arquitectura
+
+```
+JunDB
+├── JunDrive      # I/O atómico, serialización v8
+├── JunRAM        # Caché LRU con límite
+├── JunHub        # Gestión de nodos y fragmentos
+│   ├── JunDoc    # Documento individual
+│   └── JunMap    # Índice raíz
+├── JunShard      # Fragmentación de objetos
+└── JunFlow       # Sistema de interceptores
+```
+
+- **Serialización**: `v8.serialize/deserialize`
+- **Escritura atómica**: archivo temporal + rename
+- **Fragmentación**: objetos anidados → archivos separados
+- **Caché**: LRU con límite en bytes
+
+---
+
+## Limitaciones
+
+- Proceso único (sin concurrencia multi-proceso)
+- Sin lenguaje de consultas
+- Sin transacciones
+- Sin índices secundarios
+- Dependiente de v8 (Node.js)
 
 ---
 
 ## Buenas prácticas
 
-Se recomienda mantener los nodos de datos en tamaños razonables y estructurar el árbol de forma coherente. Evitar objetos excesivamente grandes mejora la eficiencia de serialización y reduce la presión sobre el sistema de archivos.
+1. **Fragmentar datos**: estructuras profundas > objetos masivos
+2. **Tamaño de nodos**: evitar nodos > 1MB
+3. **Llamar `flush()`** antes de cerrar la aplicación
+4. **Diseñar para acceso localizado**: agrupar datos relacionados
+5. **No usar como caché de alto rendimiento**
 
-JunDB debe utilizarse como almacenamiento de estado persistente y no como caché de acceso intensivo. Diseñar la estructura pensando en accesos localizados y cambios incrementales permite aprovechar al máximo su modelo.
+```javascript
+// Evitar
+db.data.everything = { /* objeto gigante */ };
 
-Comprender las limitaciones del sistema y diseñar dentro de ellas es clave para un uso correcto y sostenible de la base.
+// Preferir
+db.data.users = {};
+db.data.orders = {};
+db.data.products = {};
+```
+
+---
