@@ -192,4 +192,21 @@ export class JunDrive {
         await Promise.all(this.Pipe.values());
         return true;
     }
+
+    async prune() {
+        return this.#pipe('__maint__', async () => {
+            const scan = async (d) => {
+                const items = await fsp.readdir(d,
+                    { withFileTypes: true });
+                for (const i of items) if (i.isDirectory())
+                    await scan(path.join(d, i.name));
+                if (d !== this.dataPath && d !== this.basePath &&
+                    !(await fsp.readdir(d)).length)
+                    await fsp.rmdir(d).catch(() => null);
+            };
+
+            if (fs.existsSync(this.dataPath))
+                await scan(this.dataPath);
+        });
+    }
 }
