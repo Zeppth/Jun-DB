@@ -4,32 +4,95 @@ import { JunDrive } from "./JunDrive.js";
 import { JunMap, JunHub } from "./JunHub.js";
 import { JunFlow } from "./JunFlow.js";
 
+/*new JunDB({
+    depth: 2,
+    folder: './data',
+    memory: 20,
+    index: {
+        threshold: 10,
+        debounce: 5000
+    },
+    shards: {
+        threshold: 5,
+        debounce: 3000
+    }
+})*/
+
 export class JunDB {
+    #options = null;
     constructor(options = {}) {
         if (options?.constructor?.name !== 'Object') {
-            return new Error('Invalid options');
+            throw new Error('Invalid options');
         }
 
-        this.JunDrive = new JunDrive({
-            folder: options.folder || './data',
-            memoryLimit: options.memoryLimit || 20,
-        });
+        this.#options = options;
 
-        this.index = new JunMap(this.JunDrive, {
-            limit: options.saveLimit || 10,
-            delay: options.saveDelay || 5000
-        });
+        // class JunDrive
+        if (options.$class?.JunDrive) {
+            const a0 = options.$class.JunDrive;
+            if (a0.constructor.name == 'Array') {
+                this.JunDrive = new JunDrive(...a0);
+            } else if (a0.constructor.name == 'Object') {
+                this.JunDrive = new JunDrive(a0);
+            } else this.JunDrive = a0
+        }
 
-        this.depth = options.depth || 2;
+        if (!this.JunDrive) {
+            this.JunDrive = new JunDrive({
+                memory: { limit: options.memory || 20 },
+                folder: options.folder || './data',
+            });
+        }
+
+        // class JunMap
+        if (options.$class?.JunMap) {
+            const a0 = options.$class.JunMap;
+            if (a0.constructor.name == 'Array') {
+                this.index = new JunMap(this.JunDrive, ...a0);
+            } else if (a0.constructor.name == 'Object') {
+                this.index = new JunMap(this.JunDrive, a0);
+            } else this.index = a0
+        }
+
+        if (!this.index) {
+            this.index = new JunMap(this.JunDrive, {
+                file: {
+                    limit: options.index?.threshold || 10,
+                    delay: options.index?.debounce || 5000
+                }
+            })
+        }
+
+        // class JunFlow
+        if (options.$class?.JunFlow) {
+            const a0 = options.$class.JunFlow;
+            if (a0.constructor.name == 'Array') {
+                this.flow = new JunFlow(...a0);
+            } else this.flow = a0
+        }
+
+        if (!this.flow) {
+            this.flow = new JunFlow();
+        }
+
+        /////////////////////////////
+
         this.proxies = new WeakMap();
-
-        this.memory = () => this.JunDrive.RAM.stats()
-        this.flush = () => this.JunDrive.flush()
-
-        this.flow = new JunFlow()
 
         this.data = this.Proxy(
             this.index.data);
+
+        this.shared = {}
+    }
+
+    memory() {
+        return this.JunDrive
+            .RAM.stats()
+    }
+
+    flush() {
+        return this.JunDrive
+            .flush()
     }
 
     open(...path) {
@@ -48,8 +111,27 @@ export class JunDB {
         if (this.proxies.has(index))
             return this.proxies.get(index);
 
-        const root = new JunHub(this.JunDrive,
-            index, this.depth);
+        let root = null;
+
+        // class JunHub
+        if (this.#options?.$class?.JunHub) {
+            const a0 = this.#options.$class.JunHub;
+            if (a0.constructor.name === 'Array') {
+                root = new JunHub(this.JunDrive, index, ...a0);
+            } else if (a0.constructor.name === 'Object') {
+                root = new JunHub(this.JunDrive, index, a0);
+            } else root = a0;
+        }
+
+        if (!root) root = new JunHub(this.JunDrive, index, {
+            shard: { depth: this.#options?.depth || 2 },
+            file: {
+                limit: options?.file?.limit || 5,
+                delay: options.file?.delay || 3000
+            }
+        });
+
+        ////////////////////////////
 
         const open = (args, index, flow) => {
             const Open = (object) => () => args.reduce(
@@ -86,6 +168,15 @@ export class JunDB {
                 // flow
                 if (flow?.$call && flow?.$call?.[key]) {
                     return (...args) => flow.$call[key].apply({
+                        data: receiver, index: index, flow: flow,
+                        open: (...args) => open(args, index, flow),
+                        Jun: Jun
+                    }, args);
+                }
+
+                // shared
+                if (Jun.shared[key]) {
+                    return (...args) => Jun.shared[key].apply({
                         data: receiver, index: index, flow: flow,
                         open: (...args) => open(args, index, flow),
                         Jun: Jun

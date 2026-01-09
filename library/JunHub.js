@@ -5,7 +5,7 @@ import { JunShard } from "./JunShard.js";
 export class JunDoc {
     #count = 0;
     #timer = null;
-    constructor(file, JunDrive, options = {}) {
+    constructor(JunDrive, file, options = {}) {
         this.file = file;
         this.JunDrive = JunDrive;
 
@@ -39,12 +39,33 @@ export class JunDoc {
     }
 }
 
-export class JunMap extends JunDoc {
+export class JunMap {
     constructor(JunDrive, options = {}) {
-        super('index.bin', JunDrive, options);
+        this.JunDrive = JunDrive;
+
+        // class JunDoc
+        if (options?.$class?.JunDoc) {
+            const a0 = options.$class.JunDoc;
+            if (a0.constructor.name === 'Array') {
+                this.file = new JunDoc(JunDrive,
+                    'index.bin', ...a0);
+            } else if (a0.constructor.name === 'Object') {
+                this.file = new JunDoc(JunDrive,
+                    'index.bin', a0);
+            } else this.file = a0;
+        }
+
+        if (!this.file) {
+            this.file = new JunDoc(JunDrive, 'index.bin', {
+                limit: options?.file?.limit || 10,
+                delay: options.file?.delay || 5000
+            });
+        }
+
+        this.data = this.file.data;
         if (!this.data.$file) {
             this.data.$file = 'root.bin';
-            this.save(true);
+            this.save();
         }
     }
 
@@ -52,16 +73,50 @@ export class JunMap extends JunDoc {
         return args.reduce((acc, k) =>
             acc?.[k], this.data) ?? false;
     }
+
+    save() {
+        return this.file.save();
+    }
 }
 
 export class JunHub {
-    constructor(JunDrive, index, depth = 2) {
+    constructor(JunDrive, JunMap, options = {}) {
         this.JunDrive = JunDrive;
-        this.index = index;
+        this.JunMap = JunMap;
 
-        this.Adater = new JunShard(JunDrive, depth);
-        this.file = new JunDoc(this.index.$file,
-            JunDrive, { limit: 5, delay: 3000 });
+        // class JunShard
+        if (options.$class?.JunShard) {
+            const a0 = options.$class.JunShard;
+            if (a0.constructor.name === 'Array') {
+                this.JunShard = new JunShard(JunDrive, ...a0);
+            } else if (a0.constructor.name === 'Number') {
+                this.JunShard = new JunShard(JunDrive, a0);
+            } else this.JunShard = a0;
+        }
+
+        // class JunDoc
+        if (options?.$class?.JunDoc) {
+            const a0 = options.$class.JunDoc;
+            if (a0.constructor.name === 'Array') {
+                this.file = new JunDoc(JunDrive,
+                    this.JunMap.$file, ...a0);
+            } else if (a0.constructor.name === 'Object') {
+                this.file = new JunDoc(JunDrive,
+                    this.JunMap.$file, a0);
+            } else this.file = a0;
+        }
+
+        if (!this.JunShard) {
+            this.JunShard = new JunShard(
+                JunDrive, options?.shard?.depth || 2);
+        }
+
+        if (!this.file) {
+            this.file = new JunDoc(JunDrive, this.JunMap.$file, {
+                limit: options?.file?.limit || 5,
+                delay: options.file?.delay || 3000
+            });
+        }
     }
 
     get data() {
@@ -71,16 +126,16 @@ export class JunHub {
     get(key) {
         const value = this.data[key];
         if (typeof value === 'string' && value.endsWith('.bin')) {
-            if (!this.index[key]) this.index[key] = { $file: value };
+            if (!this.JunMap[key]) this.JunMap[key] = { $file: value };
             return { $file: value }
         }
         return value;
     }
 
     set(key, value) {
-        if (this.index[key]) {
-            this.Adater.purge(this.index[key]);
-            delete this.index[key];
+        if (this.JunMap[key]) {
+            this.JunShard.purge(this.JunMap[key]);
+            delete this.JunMap[key];
         }
 
         const isObject = value
@@ -89,11 +144,11 @@ export class JunHub {
 
         if (isObject) {
             let tmpIndex = {}
-            const file = this.Adater.forge(
+            const file = this.JunShard.forge(
                 tmpIndex, value);
 
             if (file) {
-                this.index[key] = tmpIndex;
+                this.JunMap[key] = tmpIndex;
                 this.data[key] = file;
             } else {
                 return false;
@@ -106,9 +161,9 @@ export class JunHub {
     }
 
     delete(key) {
-        if (this.index[key]) {
-            this.Adater.purge(this.index[key]);
-            delete this.index[key];
+        if (this.JunMap[key]) {
+            this.JunShard.purge(this.JunMap[key]);
+            delete this.JunMap[key];
         }
         delete this.data[key];
         this.file.save();

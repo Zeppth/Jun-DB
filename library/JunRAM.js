@@ -3,8 +3,10 @@
 import v8 from 'v8';
 
 export class JunRAM {
-    constructor(limitMB = 20) {
+    constructor(limitMB = 20, pinnedKeys = []) {
         this.limit = limitMB * 1024 * 1024;
+        this.pinnedKeys = new Set(pinnedKeys);
+        this.pinned = new Map();
         this.cache = new Map();
         this.currentSize = 0;
     }
@@ -18,6 +20,11 @@ export class JunRAM {
     }
 
     set(key, data) {
+        if (this.pinnedKeys.has(key)) {
+            this.pinned.set(key, data);
+            return true;
+        }
+
         if (this.cache.has(key))
             this.delete(key);
         const dataSize = this.#size(data);
@@ -40,6 +47,9 @@ export class JunRAM {
     }
 
     get(key) {
+        if (this.pinned.has(key))
+            return this.pinned.get(key);
+
         const item = this.cache.get(key);
         if (!item) return null;
         const data = item.data;
@@ -49,6 +59,10 @@ export class JunRAM {
     }
 
     delete(key) {
+        if (this.pinned.has(key)) {
+            return this.pinned.delete(key);
+        }
+
         const item = this.cache.get(key);
         if (!item) return false
         this.currentSize -= item.size;
@@ -67,6 +81,7 @@ export class JunRAM {
     }
 
     has(key) {
-        return this.cache.has(key);
+        return this.pinned.has(key)
+            || this.cache.has(key);
     }
 }

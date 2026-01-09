@@ -12,16 +12,25 @@ export class JunDrive {
         if (options.constructor.name !== 'Object')
             throw new Error('Invalid options');
 
-        options.folder = options.folder || './data';
-        options.memoryLimit = options.memoryLimit || 20;
+        if (options?.$class?.JunRAM) {
+            const a0 = options.$class.JunRAM;
+            if (a0.constructor.name == 'Array') {
+                this.RAM = new JunRAM(...a0);
+            } else this.RAM = a0
+        }
+
+        if (!options.folder)
+            options.folder = './data';
+
+        if (!this.RAM) this.RAM = new JunRAM(
+            options.memory?.limit || 20,
+            ['index.bin', 'root.bin']);
 
         this.onError = options.onError || ((err) =>
             console.error(`[JunDB_Internal_Error]:`, err));
 
         this.Pipe = new Map();
-        this.Pinned = new Map();
         this.basePath = path.resolve(options.folder);
-        this.RAM = new JunRAM(options.memoryLimit);
         this.dataPath = path.join(this.basePath, 'data');
         this.files = ['index.bin', 'root.bin']
 
@@ -34,17 +43,6 @@ export class JunDrive {
             fs.mkdirSync(this.dataPath,
                 { recursive: true });
         }
-
-        this.memory = {
-            set: (key, val) => this.files.includes(key)
-                ? this.Pinned.set(key, val) : this.RAM.set(key, val),
-            get: (key) => this.files.includes(key)
-                ? this.Pinned.get(key) : this.RAM.get(key),
-            delete: (key) => this.files.includes(key)
-                ? this.Pinned.delete(key) : this.RAM.delete(key),
-            has: (key) => this.files.includes(key)
-                ? this.Pinned.has(key) : this.RAM.has(key)
-        };
     }
 
     #path(filename) {
@@ -56,7 +54,7 @@ export class JunDrive {
     //////////////////////
 
     readSync(filename) {
-        const cached = this.memory.get(filename);
+        const cached = this.RAM.get(filename);
 
         if (cached) return cached;
 
@@ -65,7 +63,7 @@ export class JunDrive {
         try {
             const buffer = fs.readFileSync(filePath);
             const data = v8.deserialize(buffer);
-            this.memory.set(filename, data);
+            this.RAM.set(filename, data);
             return data;
         } catch (e) {
             this.onError(e);
@@ -89,7 +87,7 @@ export class JunDrive {
             fs.fsyncSync(fd);
             fs.closeSync(fd);
             fs.renameSync(tempPath, filePath);
-            this.memory.set(filename, data);
+            this.RAM.set(filename, data);
             return true;
         } catch (e) {
             this.onError(e);
@@ -104,7 +102,7 @@ export class JunDrive {
         try {
             if (fs.existsSync(filePath)) fs.rmSync(filePath,
                 { recursive: true, force: true });
-            this.memory.delete(filename);
+            this.RAM.delete(filename);
             return true;
         } catch (e) {
             this.onError(e);
@@ -114,7 +112,7 @@ export class JunDrive {
 
 
     existsSync(filename) {
-        if (this.memory.has(filename)) return true;
+        if (this.RAM.has(filename)) return true;
         return fs.existsSync(this.#path(filename));
     }
 
@@ -124,15 +122,14 @@ export class JunDrive {
     async #pipe(filename, action) {
         const next = (this.Pipe.get(filename) || Promise.resolve())
             .then(() => action().catch((e) => this.onError(e))).finally(() =>
-                (this.Pipe.get(filename) === next) ? this.Pipe
-                    .delete(filename) : false);
+                (this.Pipe.get(filename) === next) ? this.Pipe.delete(filename) : false);
         return this.Pipe.set(filename, next).get(filename);
     }
 
 
     async read(filename) {
         const cached = this
-            .memory.get(filename);
+            .RAM.get(filename);
         if (cached) return cached;
 
         return this.#pipe(filename, async () => {
@@ -141,7 +138,7 @@ export class JunDrive {
             try {
                 const buffer = await fsp.readFile(filePath);
                 const data = v8.deserialize(buffer);
-                this.memory.set(filename, data);
+                this.RAM.set(filename, data);
                 return data;
             } catch (e) {
                 return null;
@@ -150,7 +147,7 @@ export class JunDrive {
     }
 
     async write(filename, data = {}) {
-        this.memory.set(filename, data);
+        this.RAM.set(filename, data);
         return this.#pipe(filename, async () => {
             const filePath = this.#path(filename);
             const dir = path.dirname(filePath);
@@ -167,7 +164,7 @@ export class JunDrive {
     }
 
     async remove(filename) {
-        this.memory.delete(filename);
+        this.RAM.delete(filename);
         return this.#pipe(filename, async () => {
             const filePath = this.#path(filename);
             await fsp.rm(filePath, {
@@ -179,7 +176,7 @@ export class JunDrive {
     }
 
     async exists(filename) {
-        if (this.memory.has(filename)) return true;
+        if (this.RAM.has(filename)) return true;
         try {
             await fsp.access(this.#path(filename));
             return true;
