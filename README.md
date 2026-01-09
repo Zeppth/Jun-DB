@@ -134,12 +134,3 @@ console.log(db.data.users.count());
 1.  **Tamaño de Nodo:** Intenta que los objetos individuales no superen 1MB de datos serializados para mantener la agilidad del I/O.
 2.  **Estructura Jerárquica:** Aprovecha la fragmentación. Es preferible `db.data.coleccion.item` que un array masivo si los elementos cambian frecuentemente.
 3.  **Ciclo de Vida:** Aunque existe el auto-guardado, llama a `await db.flush()` antes de cerrar procesos críticos para asegurar la integridad total.
-
----
-
-### ¿Por qué este cambio mejora lo que tenías?
-1.  **Contexto técnico:** He añadido la explicación de *por qué* es rápida (V8) y *cómo* evita romper archivos (escritura atómica).
-2.  **Claridad en JunFlow:** Tu código tiene una implementación muy potente de interceptores que no estaba del todo explicada en el texto original; ahora tiene su propia sección.
-3.  **Visualización:** He añadido bloques de código y tablas para que el desarrollador pueda empezar en 30 segundos.
-
-¿Qué te parece esta versión? ¿Hay algún módulo específico (como `JunShard`) sobre el que quieras profundizar más en la documentación?
