@@ -6,6 +6,7 @@ El sistema asume un modelo de uso directo y predecible, pensado para aplicacione
 El acceso a los datos se realiza de forma transparente a través de proxies, permitiendo interactuar con la base como con un objeto nativo, sin introducir lenguajes de consulta ni abstracciones adicionales. La memoria se gestiona de manera explícita mediante un cache con límite definido, evitando crecimiento no controlado y cargas innecesarias. El rendimiento final depende del sistema de archivos subyacente, y el diseño favorece claridad y estabilidad por encima de optimizaciones agresivas.
 
 JunDB no está pensada para escenarios de alta concurrencia, consultas complejas o grandes volúmenes de datos no estructurados. Su uso recomendado se centra en estados persistentes bien organizados, con objetos de tamaño razonable y una estructura clara. Es una herramienta enfocada, diseñada para ofrecer persistencia simple y controlada, manteniendo un equilibrio consciente entre funcionalidad y complejidad.
+
 ---
 ## Recomendaciones
 
@@ -22,6 +23,7 @@ JunDB no está diseñada para escenarios de alta concurrencia, múltiples proces
 El rendimiento está condicionado por el sistema de archivos subyacente y por el costo de serialización binaria de los objetos persistidos. No existen mecanismos de consulta avanzada, transacciones complejas ni optimizaciones orientadas a grandes volúmenes de datos no estructurados. Estas limitaciones forman parte del diseño y permiten mantener un núcleo reducido, estable y fácil de razonar.
 
 JunDB no intenta abstraer ni ocultar estas decisiones. Su alcance es intencionalmente limitado para preservar claridad, control explícito de recursos y un comportamiento determinista.
+
 ---
 ```
 npm install https://github.com/Zeppth/Jun-DB.git
