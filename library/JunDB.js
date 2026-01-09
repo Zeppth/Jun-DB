@@ -42,6 +42,7 @@ export class JunDB {
     Proxy(index, flow) {
         const Jun = this
         if (!index) index = this.index.data;
+        if (!flow) flow = this.flow.tree;
         if (this.proxies.has(index))
             return this.proxies.get(index);
 
@@ -61,7 +62,9 @@ export class JunDB {
         const guard = (method) => (...args) => {
             if (flow?.$proxy && flow?.$proxy?.[method]) {
                 let control = { end: false, value: null, error: null };
-                const receiver = (method === 'delete') ? null : args[args.length - 1];
+                const receiver = (method === 'delete') ? null
+                    : args[args.length - 1];
+
                 flow.$proxy[method].apply({
                     resolve: (val) => { control.end = true; control.value = val },
                     reject: (err) => { control.end = true; control.error = err },
@@ -92,7 +95,6 @@ export class JunDB {
                 if (r?.end) return r.value;
 
                 // index
-
                 const rootGet = root.get(key);
 
                 if (rootGet?.constructor?.name
@@ -106,6 +108,7 @@ export class JunDB {
             set(target, key, value, receiver) {
                 const r = guard('set')(
                     target, key, value, receiver);
+
                 if (r?.end && r?.error) throw r.error;
                 if (r?.end) return r.value;
 
