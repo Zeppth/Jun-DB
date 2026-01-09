@@ -42,7 +42,9 @@ export class JunDB {
     Proxy(index, flow) {
         const Jun = this
         if (!index) index = this.index.data;
-        if (!flow) flow = this.flow.tree;
+        if (!flow) index.$file == 'root.bin' ?
+            flow = this.flow.tree : flow = {};
+
         if (this.proxies.has(index))
             return this.proxies.get(index);
 
