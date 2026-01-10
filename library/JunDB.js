@@ -12,7 +12,7 @@ import { JunFlow } from "./JunFlow.js";
         threshold: 10,
         debounce: 5000
     },
-    shards: {
+    nodes: {
         threshold: 5,
         debounce: 3000
     }
@@ -126,8 +126,8 @@ export class JunDB {
         if (!root) root = new JunHub(this.JunDrive, index, {
             shard: { depth: this.#options?.depth || 2 },
             file: {
-                limit: options?.file?.limit || 5,
-                delay: options.file?.delay || 3000
+                limit: this.#options?.nodes?.threshold || 5,
+                delay: this.#options?.nodes?.debounce || 3000
             }
         });
 
