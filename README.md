@@ -87,6 +87,8 @@ Permite validar o transformar datos antes de la persistencia.
 ```javascript
 db.flow.set('configuracion', {
     $proxy: {
+     // delete(target, key) {}
+     // get(target, key, receiver) {}
         set(target, key, value) {
             if (typeof value !== 'number') {
                 this.reject(new Error("Se requiere un valor numérico"));
