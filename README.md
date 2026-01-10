@@ -1,136 +1,127 @@
-## JunDB: Persistencia Estructurada y Fragmentada
+# JunDB
 
-**JunDB** es una base de datos embebida para Node.js orientada a la persistencia de objetos mediante un modelo de fragmentación (*sharding*) binaria. A diferencia de las bases de datos monolíticas, JunDB trata la información como un árbol de nodos independientes, permitiendo gestionar estados complejos con un bajo impacto en memoria y disco.
+Motor de persistencia de objetos jerárquicos fragmentados diseñado para el entorno de ejecución Node.js. El sistema opera mediante la intercepción transparente de operaciones a través de Proxies nativos y serialización binaria V8, permitiendo que la estructura de datos en memoria se refleje de forma isomórfica en el sistema de archivos.
 
-El acceso es totalmente transparente: **la base de datos se comporta como un objeto nativo de JavaScript** gracias al uso de Proxies, eliminando la necesidad de una API declarativa para operaciones básicas.
+Para un análisis detallado de la lógica de persistencia, la gestión de inodos y la mecánica de fragmentación recursiva, consulte el archivo [ARCHITECTURE.md](./ARCHITECTURE.md).
 
----
+## Arquitectura de Datos
 
-## Arquitectura y Decisiones de Diseño
+### 1. Persistencia Fragmentada (Sharding)
+JunDB implementa una estrategia de fragmentación incremental donde los sub-objetos se extraen y almacenan en archivos binarios individuales (`.bin`). Un índice raíz gestiona los punteros referenciales, permitiendo escrituras localizadas: la modificación de un nodo específico solo requiere la re-serialización de su fragmento correspondiente, optimizando el ancho de banda de E/S.
 
-### 1. Persistencia Incremental y Sharding
-JunDB no guarda un único archivo gigante. Utiliza un mecanismo de **sharding estructural**:
-*   Los objetos se dividen en archivos binarios independientes (`.bin`).
-*   Un índice liviano mapea las claves de la base de datos con estos archivos.
-*   Esto permite realizar **escrituras localizadas**: si cambias un usuario, solo se reescribe el fragmento de ese usuario, no toda la base de datos.
+### 2. Serialización V8
+El motor utiliza el formato de serialización nativo de V8 en lugar de JSON. Esto garantiza:
+* Soporte nativo para tipos de datos complejos: `Buffer`, `Date`, `Map`, `Set` y referencias circulares.
+* Mayor velocidad de procesamiento en la hidratación de objetos.
+* Integridad transaccional mediante escrituras atómicas (archivos temporales, sincronización de descriptores y renombramiento atómico).
 
-### 2. Serialización Binaria (V8)
-En lugar de JSON, JunDB utiliza el motor de serialización nativo de V8. Esto ofrece:
-*   **Velocidad:** Mucho más rápido que `JSON.stringify/parse`.
-*   **Tipado:** Soporta de forma nativa `Buffer`, `Date`, `Map`, `Set` y referencias circulares básicas.
-*   **Integridad:** Las escrituras son **atómicas** (se escribe en un temporal y se renombra) y utilizan `fsync` para asegurar que los datos realmente tocaron el disco.
-
-### 3. Control de Recursos (JunRAM)
-Para evitar el crecimiento descontrolado del uso de memoria, implementa un caché con política **LRU (Least Recently Used)**. Puedes definir un límite (ej. 20MB); cuando se alcanza, JunDB libera los fragmentos menos utilizados, cargándolos del disco solo cuando vuelven a ser accedidos.
+### 3. Gestión de Memoria (JunRAM)
+El control de recursos se gestiona a través de una caché LRU (Least Recently Used) que monitoriza el tamaño real en bytes de los objetos serializados. Al superar el umbral configurado, el sistema desaloja los fragmentos menos utilizados de la memoria volátil para mantener una huella de memoria controlada.
 
 ---
 
-## Modelo Mental de Uso
-
-JunDB debe entenderse como un **árbol persistente**. Cada vez que anidas un objeto, estás definiendo potencialmente una nueva frontera de persistencia.
-
-*   **Objetos:** Generan fragmentos (shards) independientes en disco.
-*   **Arrays y Primitivos:** Se almacenan de forma *inline* dentro de su nodo padre.
-
-> **Regla de oro:** Diseña tu estructura pensando en accesos localizados. Es mejor tener `db.data.users.id123` que un objeto `db.data.global` que contenga todo, ya que esto último anularía los beneficios de la fragmentación.
-
----
-
-## Instalación y Configuración
+## Instalación
 
 ```bash
 npm install https://github.com/Zeppth/Jun-DB
 ```
 
-### Inicialización
+---
+
+## Inicialización y Configuración
+
+El constructor permite configurar los límites de fragmentación y de memoria heap.
+
 ```javascript
 import { JunDB } from 'jun-db';
 
 const db = new JunDB({
-    folder: './storage',   // Directorio de archivos
-    memoryLimit: 20,       // Límite de caché en MB
-    depth: 2,              // Profundidad de subcarpetas para los shards
-    saveLimit: 10,         // Máximo de cambios antes de autosave
-    saveDelay: 5000        // Tiempo máximo de espera para persistir (ms)
+    folder: './storage',   // Directorio de persistencia
+    memory: 20,            // Límite de caché en MB
+    depth: 2,              // Profundidad de subdirectorios para shards
+    index: {
+        threshold: 10,     // Mutaciones antes de persistir índice
+        debounce: 5000     // Retardo de persistencia en ms
+    },
+    nodes: {
+        threshold: 5,      // Mutaciones antes de persistir nodos
+        debounce: 3000     // Retardo de persistencia en ms
+    }
 });
 ```
 
 ---
 
-## Uso Básico (Transparencia Total)
+## Interfaz de Acceso
 
-Gracias a los Proxies, no hay métodos `.set()` o `.get()`. Usas el lenguaje de forma natural.
+La manipulación de datos se realiza de forma directa sobre el objeto `data`. El sistema resuelve las lecturas y escrituras en disco de forma reactiva.
 
 ```javascript
-// Escritura automática
-db.data.app = {
-    settings: { theme: 'dark' },
-    counters: [1, 2, 3]
+// Escritura: El sistema genera los fragmentos necesarios de forma automática
+db.data.servicios = {
+    web: { puerto: 80, estado: 'activo' },
+    db: { puerto: 5432, estado: 'standby' }
 };
 
-// Lectura directa
-console.log(db.data.app.settings.theme); // 'dark'
+// Lectura: Carga perezosa (lazy loading) desde disco al acceder a la propiedad
+console.log(db.data.servicios.web.estado);
 
-// Modificación (detectada por el Proxy)
-db.data.app.settings.theme = 'light'; 
+// Modificación: El Proxy detecta el cambio y programa la escritura atómica
+db.data.servicios.web.estado = 'mantenimiento';
 
-// Eliminación de fragmentos en disco
-delete db.data.app.settings;
+// Eliminación: Se eliminan los archivos físicos asociados al fragmento
+delete db.data.servicios.db;
 
-// Asegurar que todo se ha guardado
+// Sincronización: Fuerza el vaciado de la cola de escritura
 await db.flush();
 ```
 
 ---
 
-## JunFlow: Interceptores y Lógica Personalizada
+## Control de Flujo (JunFlow)
 
-`JunFlow` es el sistema de middleware de JunDB. Permite inyectar comportamiento en rutas específicas de la base de datos.
+JunFlow permite superponer lógica de middleware y métodos personalizados sobre la estructura de datos estática.
 
-### Proxy Hooks ($proxy)
-Intercepta operaciones de bajo nivel:
+### Interceptores ($proxy)
+Permite validar o transformar datos antes de la persistencia.
 ```javascript
-db.flow.set('users', {
+db.flow.set('configuracion', {
     $proxy: {
         set(target, key, value) {
-            if (!value.email) this.reject(new Error("Email requerido"));
-            // Si no llamas a reject, la operación continúa normalmente.
+            if (typeof value !== 'number') {
+                this.reject(new Error("Se requiere un valor numérico"));
+            }
         }
     }
 });
 ```
 
-### Métodos Personalizados ($call)
-Añade funciones a tus objetos persistentes:
+### Métodos inyectados ($call)
+Permite definir lógica procedimental accesible desde el grafo de objetos.
 ```javascript
-db.flow.set('users', {
+db.flow.set('servicios', {
     $call: {
-        count() {
-            return Object.keys(this.data).length;
-        },
-        resetAll() {
-            for (let k in this.data) this.data[k].active = false;
+        obtenerActivos() {
+            return Object.keys(this.data).filter(k => this.data[k].estado === 'activo');
         }
     }
 });
 
-// Uso:
-db.data.users.resetAll();
-console.log(db.data.users.count());
+const activos = db.data.servicios.obtenerActivos();
 ```
 
 ---
 
-## Limitaciones Conocidas
+## Limitaciones Técnicas
 
-*   **Entorno:** Diseñada exclusivamente para Node.js (depende de `v8` y `fs`).
-*   **Concurrencia:** No apta para acceso simultáneo desde múltiples procesos (Single Process Only).
-*   **Consultas:** No incluye motor de búsqueda complejo ni indexación secundaria. Si necesitas buscar, debes iterar sobre las claves o estructurar tus datos para acceso directo por ID.
+* Dependencia estricta de Node.js: El uso de los módulos nativos `v8`, `fs` y `path` impide su ejecución en entornos de navegador o Deno/Bun sin compatibilidad completa.
+* Concurrencia: El sistema está diseñado para acceso desde un único proceso. No implementa bloqueos de archivos (file locking) para entornos multiproceso.
+* Portabilidad: Los datos se almacenan en formato binario de V8, lo que requiere herramientas de deserialización específicas fuera del ecosistema JavaScript.
 
 ---
 
-## Buenas Prácticas
+## Buenas Prácticas de Diseño
 
-1.  **Tamaño de Nodo:** Intenta que los objetos individuales no superen 1MB de datos serializados para mantener la agilidad del I/O.
-2.  **Estructura Jerárquica:** Aprovecha la fragmentación. Es preferible `db.data.coleccion.item` que un array masivo si los elementos cambian frecuentemente.
-3.  **Ciclo de Vida:** Aunque existe el auto-guardado, llama a `await db.flush()` antes de cerrar procesos críticos para asegurar la integridad total.
+1. Jerarquía de Nodos: Diseñe la estructura de datos para evitar nodos raíz excesivamente pesados. La fragmentación es más eficiente cuando el acceso es granular.
+2. Tipos de Datos: Aproveche el soporte de V8 para almacenar `Buffers` directamente en lugar de codificarlos en Base64.
+3. Ciclo de Vida: En procesos críticos, asegúrese de invocar el método `flush()` antes de la finalización del proceso para garantizar que todas las mutaciones en cola se han sincronizado con el almacenamiento físico.
