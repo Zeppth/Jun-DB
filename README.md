@@ -178,6 +178,3 @@ const db = new JunDB({
 ---
 ### Licencia
 Este proyecto está bajo la Licencia [MIT](LICENSE).
-
-### Autor
-Desarrollado por [Zeppth](https://github.com/Zeppth).
