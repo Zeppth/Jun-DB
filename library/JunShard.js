@@ -10,6 +10,12 @@ export const genId = (depth) => {
     return `${folder}/${id}.bin`;
 };
 
+function isShardable(val) {
+    if (!val || typeof val !== 'object') return false;
+    const proto = Object.getPrototypeOf(val);
+    return proto === Object.prototype || proto === null;
+}
+
 export class JunShard {
     constructor(JunDrive, depth) {
         this.JunDrive = JunDrive;
@@ -33,9 +39,8 @@ export class JunShard {
             index.$file = Id;
 
             for (const key in value) {
-                const bool = typeof value[key] === 'object'
-                    && !Array.isArray(value[key]);
-                if (value[key] && !bool) continue;
+                 if (!isShardable(value[key])) continue;
+                 
                 index[key] = {};
                 value[key] = this.forge(
                     index[key],

@@ -78,6 +78,7 @@ export class JunDB {
         /////////////////////////////
 
         this.proxies = new WeakMap();
+        this.flows = new WeakMap();
 
         this.data = this.Proxy(
             this.index.data);
@@ -105,8 +106,10 @@ export class JunDB {
     Proxy(index, flow) {
         const Jun = this
         if (!index) index = this.index.data;
-        if (!flow) index.$file == 'root.bin' ?
-            flow = this.flow.tree : flow = {};
+        if (index.$file == 'root.bin')
+            flow = this.flow.tree
+
+        if (flow) this.flows.set(index, flow);
 
         if (this.proxies.has(index))
             return this.proxies.get(index);
@@ -165,22 +168,27 @@ export class JunDB {
                 if (typeof key === 'symbol')
                     return Reflect.get(target, key);
 
+                const flow = Jun.flows.get(index);
+
                 // flow
                 if (flow?.$call && flow?.$call?.[key]) {
-                    return (...args) => flow.$call[key].apply({
-                        data: receiver, index: index, flow: flow,
-                        open: (...args) => open(args, index, flow),
-                        Jun: Jun
-                    }, args);
-                }
-
-                // shared
-                if (Jun.shared[key]) {
-                    return (...args) => Jun.shared[key].apply({
-                        data: receiver, index: index, flow: flow,
-                        open: (...args) => open(args, index, flow),
-                        Jun: Jun
-                    }, args);
+                    const fun = flow.$call[key];
+                    if (typeof fun === 'function') {
+                        return (...args) => fun.apply({
+                            data: receiver, index: index, flow: flow,
+                            open: (...args) => open(args, index, flow),
+                            Jun: Jun
+                        }, args);
+                    }
+                } else if (Jun.shared[key]) {
+                    const fun = Jun.shared[key];
+                    if (typeof fun === 'function') {
+                        return (...args) => fun.apply({
+                            data: receiver, index: index, flow: flow,
+                            open: (...args) => open(args, index, flow),
+                            Jun: Jun
+                        }, args);
+                    }
                 }
 
                 const r = guard('get')(target, key, receiver);

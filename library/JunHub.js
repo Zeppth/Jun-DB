@@ -138,9 +138,13 @@ export class JunHub {
             delete this.JunMap[key];
         }
 
-        const isObject = value
-            && typeof value === 'object'
-            && !Array.isArray(value);
+        let isObject
+
+        if (value && typeof value === 'object') {
+            const proto = Object.getPrototypeOf(value);
+            isObject = (proto === Object.prototype
+                || proto === null);
+        }
 
         if (isObject) {
             let tmpIndex = {}

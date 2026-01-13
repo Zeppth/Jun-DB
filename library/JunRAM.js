@@ -27,6 +27,7 @@ export class JunRAM {
 
         if (this.cache.has(key))
             this.delete(key);
+        
         const dataSize = this.#size(data);
         if (dataSize > this.limit) {
             console.warn(`[JunDB] ${key} >  ${this
