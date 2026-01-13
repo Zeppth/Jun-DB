@@ -1,6 +1,6 @@
 ================================================
 ESTRUCTURA DEL PROYECTO Y CÓDIGO FUENTE
-Generado el: 9/1/2026, 19:50:47
+Generado el: 13/1/2026, 12:49:09
 ================================================
 
 MAPA DE DIRECTORIOS:
@@ -30,7 +30,6 @@ import { JunDoc, JunMap, JunHub } from './library/JunHub.js';
 import { JunFlow } from './library/JunFlow.js';
 import { JunRAM } from './library/JunRAM.js';
 import { JunDrive } from './library/JunDrive.js';
-
 
 export {
     JunDB,
@@ -128,6 +127,7 @@ export class JunDB {
         /////////////////////////////
 
         this.proxies = new WeakMap();
+        this.flows = new WeakMap();
 
         this.data = this.Proxy(
             this.index.data);
@@ -155,8 +155,10 @@ export class JunDB {
     Proxy(index, flow) {
         const Jun = this
         if (!index) index = this.index.data;
-        if (!flow) index.$file == 'root.bin' ?
-            flow = this.flow.tree : flow = {};
+        if (index.$file == 'root.bin')
+            flow = this.flow.tree
+
+        if (flow) this.flows.set(index, flow);
 
         if (this.proxies.has(index))
             return this.proxies.get(index);
@@ -215,22 +217,27 @@ export class JunDB {
                 if (typeof key === 'symbol')
                     return Reflect.get(target, key);
 
+                const flow = Jun.flows.get(index);
+
                 // flow
                 if (flow?.$call && flow?.$call?.[key]) {
-                    return (...args) => flow.$call[key].apply({
-                        data: receiver, index: index, flow: flow,
-                        open: (...args) => open(args, index, flow),
-                        Jun: Jun
-                    }, args);
-                }
-
-                // shared
-                if (Jun.shared[key]) {
-                    return (...args) => Jun.shared[key].apply({
-                        data: receiver, index: index, flow: flow,
-                        open: (...args) => open(args, index, flow),
-                        Jun: Jun
-                    }, args);
+                    const fun = flow.$call[key];
+                    if (typeof fun === 'function') {
+                        return (...args) => fun.apply({
+                            data: receiver, index: index, flow: flow,
+                            open: (...args) => open(args, index, flow),
+                            Jun: Jun
+                        }, args);
+                    }
+                } else if (Jun.shared[key]) {
+                    const fun = Jun.shared[key];
+                    if (typeof fun === 'function') {
+                        return (...args) => fun.apply({
+                            data: receiver, index: index, flow: flow,
+                            open: (...args) => open(args, index, flow),
+                            Jun: Jun
+                        }, args);
+                    }
                 }
 
                 const r = guard('get')(target, key, receiver);
@@ -695,9 +702,13 @@ export class JunHub {
             delete this.JunMap[key];
         }
 
-        const isObject = value
-            && typeof value === 'object'
-            && !Array.isArray(value);
+        let isObject
+
+        if (value && typeof value === 'object') {
+            const proto = Object.getPrototypeOf(value);
+            isObject = (proto === Object.prototype
+                || proto === null);
+        }
 
         if (isObject) {
             let tmpIndex = {}
@@ -765,6 +776,7 @@ export class JunRAM {
 
         if (this.cache.has(key))
             this.delete(key);
+        
         const dataSize = this.#size(data);
         if (dataSize > this.limit) {
             console.warn(`[JunDB] ${key} >  ${this
@@ -841,6 +853,12 @@ export const genId = (depth) => {
     return `${folder}/${id}.bin`;
 };
 
+function isShardable(val) {
+    if (!val || typeof val !== 'object') return false;
+    const proto = Object.getPrototypeOf(val);
+    return proto === Object.prototype || proto === null;
+}
+
 export class JunShard {
     constructor(JunDrive, depth) {
         this.JunDrive = JunDrive;
@@ -864,9 +882,8 @@ export class JunShard {
             index.$file = Id;
 
             for (const key in value) {
-                const bool = typeof value[key] === 'object'
-                    && !Array.isArray(value[key]);
-                if (value[key] && !bool) continue;
+                 if (!isShardable(value[key])) continue;
+                 
                 index[key] = {};
                 value[key] = this.forge(
                     index[key],
@@ -892,20 +909,31 @@ export class JunShard {
 
 {
   "name": "jun-db",
-  "version": "1.0.0",
-  "description": "Minimalist, sharded binary database for Node.js. High-performance persistence through transparent Proxies and atomic I/O.",
+  "version": "1.0.2",
+  "description": "Minimalist NoSQL sharded database for Node.js. High-performance binary storage that feels like a native JS object via transparent Proxies. Zero dependencies and atomic I/O.",
   "main": "index.js",
   "type": "module",
+  "files": [
+    "index.js",
+    "library/**/*"
+  ],
   "keywords": [
+    "db",
+    "jun",
+    "jun-db",
+    "nosql",
     "database",
-    "binary-storage",
     "sharding",
     "v8-serialization",
-    "lru-cache",
-    "atomic-write",
-    "high-performance",
     "proxy-database",
-    "jun-base"
+    "embedded-database",
+    "document-store",
+    "persistence",
+    "binary-storage",
+    "zero-dependency",
+    "atomic-writes",
+    "high-performance",
+    "lru-cache"
   ],
   "author": "Zeppth",
   "license": "MIT",
@@ -917,5 +945,6 @@ export class JunShard {
     "url": "git+https://github.com/Zeppth/Jun-DB.git"
   }
 }
+
 
 --- END OF FILE package.json ---
