@@ -1,6 +1,6 @@
 // ./library/JunHub.js
 
-import { JunShard } from "./JunShard.js";
+import { JunShard } from './JunShard.js';
 
 export class JunDoc {
     #count = 0;
@@ -9,8 +9,10 @@ export class JunDoc {
         this.file = file;
         this.JunDrive = JunDrive;
 
-        this._limit = options.limit ?? 10;
-        this._delay = options.delay ?? 5000;
+        this._limit = options
+            .limit ?? 10;
+        this._delay = options
+            .delay ?? 5000;
     }
 
     get data() {
@@ -40,83 +42,80 @@ export class JunDoc {
 }
 
 export class JunMap {
-    constructor(JunDrive, options = {}) {
+    constructor(JunDrive, file, options = {}) {
+        file = file || 'root.map.bin';
         this.JunDrive = JunDrive;
 
         // class JunDoc
         if (options?.$class?.JunDoc) {
             const a0 = options.$class.JunDoc;
             if (a0.constructor.name === 'Array') {
-                this.file = new JunDoc(JunDrive,
-                    'index.bin', ...a0);
+                this.file = new JunDoc(JunDrive, file, ...a0);
             } else if (a0.constructor.name === 'Object') {
-                this.file = new JunDoc(JunDrive,
-                    'index.bin', a0);
+                this.file = new JunDoc(JunDrive, file, a0);
             } else this.file = a0;
         }
 
-        if (!this.file) {
-            this.file = new JunDoc(JunDrive, 'index.bin', {
-                limit: options?.file?.limit || 10,
-                delay: options.file?.delay || 5000
-            });
-        }
+        if (!this.file) this.file = new JunDoc(
+            JunDrive, file, {
+            limit: options?.file?.limit || 10,
+            delay: options.file?.delay || 5000
+        });
+
+        ///////////
 
         this.data = this.file.data;
-        if (!this.data.$file) {
-            this.data.$file = 'root.bin';
-            this.save();
-        }
+        if (!this.data.$file)
+            this.data.$file = file;
     }
 
-    get(...args) {
-        return args.reduce((acc, k) =>
-            acc?.[k], this.data) ?? false;
+    get(key) {
+        if (typeof key == 'string') {
+            return this.data[key] ?? false;
+        } else return false;
+    }
+
+    set(key, value) {
+        this.data[key] = value;
+        this.file.save();
+    }
+
+    delete(key) {
+        delete this.data[key];
+        this.file.save();
+    }
+
+    keys() {
+        return Object.keys(this.data);
     }
 
     save() {
-        return this.file.save();
+        this.file.save();
     }
 }
 
 export class JunHub {
     constructor(JunDrive, JunMap, options = {}) {
         this.JunDrive = JunDrive;
-        this.JunMap = JunMap;
-
-        // class JunShard
-        if (options.$class?.JunShard) {
-            const a0 = options.$class.JunShard;
-            if (a0.constructor.name === 'Array') {
-                this.JunShard = new JunShard(JunDrive, ...a0);
-            } else if (a0.constructor.name === 'Number') {
-                this.JunShard = new JunShard(JunDrive, a0);
-            } else this.JunShard = a0;
-        }
+        const mapFile = JunMap.get('$file');
+        const nodeFile = mapFile.replace(
+            '.map.bin', '.node.bin');
 
         // class JunDoc
         if (options?.$class?.JunDoc) {
             const a0 = options.$class.JunDoc;
             if (a0.constructor.name === 'Array') {
-                this.file = new JunDoc(JunDrive,
-                    this.JunMap.$file, ...a0);
+                this.file = new JunDoc(JunDrive, nodeFile, ...a0);
             } else if (a0.constructor.name === 'Object') {
-                this.file = new JunDoc(JunDrive,
-                    this.JunMap.$file, a0);
+                this.file = new JunDoc(JunDrive, nodeFile, a0);
             } else this.file = a0;
         }
 
-        if (!this.JunShard) {
-            this.JunShard = new JunShard(
-                JunDrive, options?.shard?.depth || 2);
-        }
-
-        if (!this.file) {
-            this.file = new JunDoc(JunDrive, this.JunMap.$file, {
-                limit: options?.file?.limit || 5,
-                delay: options.file?.delay || 3000
-            });
-        }
+        if (!this.file) this.file = new JunDoc(
+            JunDrive, nodeFile, {
+            limit: options?.file?.limit || 10,
+            delay: options.file?.delay || 5000
+        });
     }
 
     get data() {
@@ -124,53 +123,95 @@ export class JunHub {
     }
 
     get(key) {
-        const value = this.data[key];
-        if (typeof value === 'string' && value.endsWith('.bin')) {
-            if (!this.JunMap[key]) this.JunMap[key] = { $file: value };
-            return { $file: value }
-        }
-        return value;
+        if (typeof key == 'string') {
+            return this.data[key] ?? false;
+        } else return false;
     }
 
     set(key, value) {
-        if (this.JunMap[key]) {
-            this.JunShard.purge(this.JunMap[key]);
-            delete this.JunMap[key];
-        }
-
-        let isObject
-
-        if (value && typeof value === 'object') {
-            const proto = Object.getPrototypeOf(value);
-            isObject = (proto === Object.prototype
-                || proto === null);
-        }
-
-        if (isObject) {
-            let tmpIndex = {}
-            const file = this.JunShard.forge(
-                tmpIndex, value);
-
-            if (file) {
-                this.JunMap[key] = tmpIndex;
-                this.data[key] = file;
-            } else {
-                return false;
-            }
-        } else {
-            this.data[key] = value;
-        }
-
+        this.data[key] = value;
         this.file.save();
     }
 
     delete(key) {
-        if (this.JunMap[key]) {
-            this.JunShard.purge(this.JunMap[key]);
-            delete this.JunMap[key];
-        }
         delete this.data[key];
         this.file.save();
+    }
+
+    keys() {
+        return Object.keys(this.data);
+    }
+
+    save() {
+        this.file.save();
+    }
+}
+
+
+export class JunNode {
+    constructor(JunDrive, JunMap, options = {}) {
+        this.JunMap = JunMap
+        this.JunDrive = JunDrive
+
+        if (options?.$class?.JunHub) {
+            const a0 = options.$class.JunHub;
+            if (a0.constructor.name === 'Array') {
+                this.JunHub = new JunHub(...a0);
+            } else if (a0.constructor.name === 'Object') {
+                this.JunHub = new JunHub(JunDrive, JunMap, a0);
+            } else this.JunHub = a0;
+        }
+
+        if (options?.$class?.JunShard) {
+            const a0 = options.$class.JunShard;
+            if (a0.constructor.name === 'Array') {
+                this.JunShard = new JunShard(JunDrive,
+                    this.JunMap, this.JunHub, ...a0)
+            } else if (a0.constructor.name === 'Object') {
+                this.JunShard = new JunShard(JunDrive,
+                    this.JunMap, this.JunHub, a0)
+            } else this.JunShard = a0;
+        }
+
+        if (!this.JunShard) this.JunShard = new JunShard(JunDrive,
+            this.JunMap, this.JunHub, options.shard?.depth || 2)
+
+        if (!this.JunHub) this.JunHub = new JunHub(
+            JunDrive, JunMap, options)
+    }
+
+    get data() {
+        return this.JunHub.data;
+    }
+
+    get(key) {
+        return this.data[key];
+    }
+
+    set(key, value) {
+        if (this.JunMap.get(key)) this.delete(key);
+
+        if (this.JunShard.isObject(value)) {
+            this.JunShard.forge({ [key]: value },
+                this.JunMap, this.JunHub);
+        } else {
+            this.data[key] = value;
+            this.JunHub.file.save();
+        }
+    }
+
+    delete(key) {
+        const map = this.JunMap.get(key);
+
+        if (map) {
+            this.JunShard.purge(map);
+            this.JunMap.delete(key);
+            delete this.data[key];
+            this.JunHub.file.save();
+        } else {
+            delete this.data[key];
+            this.JunHub.file.save();
+        }
     }
 
     keys() {

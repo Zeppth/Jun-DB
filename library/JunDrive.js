@@ -3,207 +3,199 @@
 import fs from 'fs';
 import fsp from 'fs/promises';
 import path from 'path';
-import v8 from 'v8';
 
 import { JunRAM } from './JunRAM.js';
+import { syncIO, asyncIO } from './JunIO.js';
 
 export class JunDrive {
     constructor(options = {}) {
         if (options.constructor.name !== 'Object')
             throw new Error('Invalid options');
 
-        if (options?.$class?.JunRAM) {
-            const a0 = options.$class.JunRAM;
+        //////////
+        if (options?.$class?.syncIO) {
+            const a0 = options.$class.syncIO;
             if (a0.constructor.name == 'Array') {
-                this.RAM = new JunRAM(...a0);
-            } else this.RAM = a0
+                this.syncIO = new syncIO(...a0);
+            } else this.syncIO = a0
         }
 
-        if (!options.folder)
-            options.folder = './data';
+        if (options?.$class?.asyncIO) {
+            const a0 = options.$class.asyncIO;
+            if (a0.constructor.name == 'Array') {
+                this.asyncIO = new asyncIO(...a0);
+            } else this.asyncIO = a0
+        }
 
-        if (!this.RAM) this.RAM = new JunRAM(
-            options.memory?.limit || 20,
-            ['index.bin', 'root.bin']);
+        if (options?.$class?.JunRAM?.maps) {
+            const a0 = options.$class.JunRAM.maps;
+            if (a0.constructor.name == 'Array') {
+                this.mapsRam = new JunRAM(...a0);
+            } else this.mapsRam = a0
+        }
 
-        this.onError = options.onError || ((err) =>
-            console.error(`[JunDB_Internal_Error]:`, err));
+        if (options?.$class?.JunRAM?.nodes) {
+            const a0 = options.$class.JunRAM.nodes;
+            if (a0.constructor.name == 'Array') {
+                this.nodesRam = new JunRAM(...a0);
+            } else this.nodesRam = a0
+        }
 
-        this.Pipe = new Map();
+
+        //////////
+        if (!this.syncIO) {
+            this.syncIO = new syncIO(
+                options.folder);
+        }
+
+        if (!this.asyncIO) {
+            this.asyncIO = new asyncIO(
+                options.folder);
+        }
+
+        if (!this.mapsRam) {
+            const files = ['root.map.bin'];
+            const memory = options.memory?.maps || 5;
+            this.mapsRam = new JunRAM(memory, files);
+        }
+
+        if (!this.nodesRam) {
+            const files = ['root.node.bin'];
+            const memory = options.memory?.nodes || 20;
+            this.nodesRam = new JunRAM(memory, files);
+        }
+
+        //////////
+        if (!options.folder) options.folder = './data';
+
         this.basePath = path.resolve(options.folder);
-        this.dataPath = path.join(this.basePath, 'data');
-        this.files = ['index.bin', 'root.bin']
 
-        if (!fs.existsSync(this.basePath)) {
-            fs.mkdirSync(this.basePath,
-                { recursive: true });
-        }
+        this.nodesPath = path.join(this.basePath, 'nodes');
+        this.mapsPath = path.join(this.basePath, 'maps');
 
-        if (!fs.existsSync(this.dataPath)) {
-            fs.mkdirSync(this.dataPath,
-                { recursive: true });
-        }
+        const folders = [
+            this.basePath,
+            this.nodesPath,
+            this.mapsPath
+        ]
+
+        folders.forEach(dir => {
+            if (!fs.existsSync(dir))
+                fs.mkdirSync(dir, {
+                    recursive: true
+                });
+        });
     }
 
-    #path(filename) {
-        if (!this.files.includes(filename))
-            return path.join(this.dataPath, filename);
-        return path.join(this.basePath, filename);
+    #a0(filename) {
+        let ram = null;
+        let $path = null;
+
+        if (this.mapsRam.pinnedKeys.has(filename)) {
+            $path = path.join(this.basePath, filename);
+            ram = this.mapsRam;
+        } else if (this.nodesRam.pinnedKeys.has(filename)) {
+            $path = path.join(this.basePath, filename);
+            ram = this.nodesRam;
+        } else if (filename.endsWith('map.bin')) {
+            ram = this.mapsRam;
+            $path = path.join(this.mapsPath, filename);
+        } else if (filename.endsWith('node.bin')) {
+            ram = this.nodesRam;
+            $path = path.join(this.nodesPath, filename);
+        }
+
+        return {
+            ram: ram,
+            path: $path,
+        }
     }
 
     //////////////////////
 
     readSync(filename) {
-        const cached = this.RAM.get(filename);
-
+        const { ram, path } = this.#a0(filename);
+        const cached = ram.get(filename);
         if (cached) return cached;
+        const data = this.syncIO.read(path);
+        ram.set(filename, data);
+        return data;
 
-        const filePath = this.#path(filename);
-
-        try {
-            const buffer = fs.readFileSync(filePath);
-            const data = v8.deserialize(buffer);
-            this.RAM.set(filename, data);
-            return data;
-        } catch (e) {
-            this.onError(e);
-            return null;
-        }
     }
 
     writeSync(filename, data = {}) {
-        const filePath = this.#path(filename);
-        try {
-            const dir = path.dirname(filePath);
-
-            if (!fs.existsSync(dir)) {
-                fs.mkdirSync(dir, { recursive: true });
-            }
-
-            const tempPath = filePath + '.tmp';
-            const buffer = v8.serialize(data);
-            const fd = fs.openSync(tempPath, 'w');
-            fs.writeSync(fd, buffer);
-            fs.fsyncSync(fd);
-            fs.closeSync(fd);
-            fs.renameSync(tempPath, filePath);
-            this.RAM.set(filename, data);
-            return true;
-        } catch (e) {
-            this.onError(e);
-            return false;
-        }
+        const { ram, path } = this.#a0(filename);
+        this.syncIO.write(path, data);
+        ram.set(filename, data);
+        return true;
     }
 
     removeSync(filename) {
-        const filePath = this
-            .#path(filename);
-
-        try {
-            if (fs.existsSync(filePath)) fs.rmSync(filePath,
-                { recursive: true, force: true });
-            this.RAM.delete(filename);
-            return true;
-        } catch (e) {
-            this.onError(e);
-            return false;
-        }
+        const { ram, path } = this.#a0(filename);
+        this.syncIO.remove(path);
+        ram.delete(filename);
+        return true;
     }
 
 
     existsSync(filename) {
-        if (this.RAM.has(filename)) return true;
-        return fs.existsSync(this.#path(filename));
+        const { ram, path } = this.#a0(filename);
+        if (ram.has(filename)) return true;
+        return this.syncIO.exists(path);
     }
-
 
     //////////////////////
 
-    async #pipe(filename, action) {
-        const next = (this.Pipe.get(filename) || Promise.resolve())
-            .then(() => action().catch((e) => this.onError(e))).finally(() =>
-                (this.Pipe.get(filename) === next) ? this.Pipe.delete(filename) : false);
-        return this.Pipe.set(filename, next).get(filename);
-    }
-
-
     async read(filename) {
-        const cached = this
-            .RAM.get(filename);
+        const { ram, path } = this.#a0(filename);
+        const cached = ram.get(filename);
         if (cached) return cached;
-
-        return this.#pipe(filename, async () => {
-            const filePath = this.#path(filename);
-
-            try {
-                const buffer = await fsp.readFile(filePath);
-                const data = v8.deserialize(buffer);
-                this.RAM.set(filename, data);
-                return data;
-            } catch (e) {
-                return null;
-            }
-        });
+        const data = await this.asyncIO.read(path);
+        ram.set(filename, data);
+        return data;
     }
 
     async write(filename, data = {}) {
-        this.RAM.set(filename, data);
-        return this.#pipe(filename, async () => {
-            const filePath = this.#path(filename);
-            const dir = path.dirname(filePath);
-            await fsp.mkdir(dir, { recursive: true });
-            const tempPath = filePath + '.tmp';
-            const buffer = v8.serialize(data);
-            const handle = await fsp.open(tempPath, 'w');
-            await handle.write(buffer);
-            await handle.sync();
-            await handle.close();
-            await fsp.rename(tempPath, filePath);
-            return true;
-        });
+        const { ram, path } = this.#a0(filename);
+        ram.set(filename, data);
+        return this.asyncIO.write(path, data);
     }
 
     async remove(filename) {
-        this.RAM.delete(filename);
-        return this.#pipe(filename, async () => {
-            const filePath = this.#path(filename);
-            await fsp.rm(filePath, {
-                recursive: true,
-                force: true
-            });
-            return true;
-        });
+        const { ram, path } = this.#a0(filename);
+        ram.delete(filename);
+        return this.asyncIO.remove(path);
     }
 
     async exists(filename) {
-        if (this.RAM.has(filename)) return true;
-        try {
-            await fsp.access(this.#path(filename));
-            return true;
-        } catch {
-            return false;
-        }
+        const { ram, path } = this.#a0(filename);
+        if (ram.has(filename)) return true;
+        return this.asyncIO.exists(path);
     }
 
+    //////////////////////
+
     async flush() {
-        await Promise.all(this.Pipe.values());
-        return true;
+        return await this
+            .asyncIO.flush();
     }
 
     async prune() {
-        return this.#pipe('__maint__', async () => {
+        return this.asyncIO.queue('__maint__', async () => {
             const scan = async (d) => {
                 const items = await fsp.readdir(d,
                     { withFileTypes: true });
                 for (const i of items) if (i.isDirectory())
                     await scan(path.join(d, i.name));
-                if (d !== this.dataPath && d !== this.basePath &&
+                if (d !== this.nodesPath && d !== this.basePath &&
                     !(await fsp.readdir(d)).length)
                     await fsp.rmdir(d).catch(() => null);
             };
 
-            if (fs.existsSync(this.dataPath))
-                await scan(this.dataPath);
+            if (fs.existsSync(this.nodesPath))
+                await scan(this.nodesPath);
+            if (fs.existsSync(this.mapsPath))
+                await scan(this.mapsPath);
         });
     }
 }
