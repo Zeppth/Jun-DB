@@ -28,7 +28,7 @@ import { JunDB } from 'jun-db';
 const db = new JunDB({
     folder: './data',   // Root directory for persistence
     memory: 50,         // Strict RAM limit (MB) for the LRU cache
-    atomic: true,       // Enables atomic writing (prevent corruption)
+    atomic: true,       // Enables atomic writing (prevents corruption)
     depth: 2,           // Directory depth for ID generation (sharding distribution)
     maps: {
         threshold: 10,  // Operations buffer before saving the index (map)
@@ -56,7 +56,7 @@ db.data.users = {
 // Reading: Lazy Loading
 // The system only loads the necessary fragment from disk into RAM
 // when the property is accessed.
-console.log(db.data.users.name); 
+console.log(db.data.users.name);
 
 // Deletion
 delete db.data.users;
@@ -87,6 +87,35 @@ The system uses Node's native V8 serialization for high-performance binary stora
 ### 3. Atomic Integrity
 
 Files are never modified directly. Updates are written to a `.tmp` file, synced to disk, and then renamed. This guarantees that the database state remains valid even if the process crashes mid-write.
+
+## Considerations and Limitations
+
+### Performance and Scalability
+- **I/O as a bottleneck:** Each access to deeply nested data can involve multiple disk reads. Recommended for data that is accessed in a localized manner.
+- **Many small files:** Sharding generates numerous files. Filesystems like ext4 or NTFS handle this well, but it can affect backup or synchronization operations.
+- **V8 Serialization:** Only serializes what V8 can serialize. Does not support custom functions, promises, sockets, etc. (except via `.toString()` in the flow system).
+
+### Memory Usage
+- **Strict LRU cache:** When the memory limit is reached, entire shards are unloaded, not parts of them. Adjust `memory` according to your access patterns.
+- **Sharding overhead:** Each shard adds metadata. For small, flat data, a traditional database may be more efficient.
+
+### Technical Limitations
+- **Node.js exclusive environment:** Not portable to browsers or other runtimes.
+- **No multi-operation transactions:** No automatic rollback for complex operations.
+- **No indexes or advanced queries:** You must implement your own indexes if you need complex searches.
+- **Basic concurrency:** Multiple processes can read, but only one process should write at a time.
+
+### Recommended Use Cases
+- **Hierarchical configurations:** Ideal for configuration-like data with moderate depth.
+- **Session or cache data:** Where accesses are localized and data has limited lifespan.
+- **Rapid prototyping:** When you need persistence without defining schemas.
+- **Desktop/CLI applications:** Where local I/O is fast and controlled.
+
+### Not Recommended Use Cases
+- **Highly relational data:** Use SQL databases.
+- **High-frequency writes:** Such as high-speed logging.
+- **Complex searches:** No built-in indexes.
+- **Simultaneous multi-process environments:** No sophisticated locking.
 
 ## Flow Control System
 
