@@ -1,6 +1,6 @@
 ================================================
 ESTRUCTURA DEL PROYECTO Y CÓDIGO FUENTE
-Generado el: 26/1/2026, 13:44:35
+Generado el: 5/2/2026, 17:45:24
 ================================================
 
 MAPA DE DIRECTORIOS:
@@ -30,7 +30,27 @@ CONTENIDO DE LOS ARCHIVOS
 
 // index.js
 import { JunDB } from './library/JunDB.js';
-export { JunDB }
+import { JunDoc } from './library/core/JunDoc.js';
+import { JunFlow } from './library/core/JunFlow.js';
+import { JunHub } from './library/core/JunHub.js';
+import { JunMap } from './library/core/JunMap.js';
+import { JunNode } from './library/core/JunNode.js';
+import { JunShard } from './library/JunShard.js';
+import { JunDrive } from './library/JunDrive.js';
+import { JunRAM } from './library/JunRAM.js';
+
+export {
+    JunDB,
+    JunDoc,
+    JunFlow,
+    JunHub,
+    JunMap,
+    JunNode,
+    JunShard,
+    JunDrive,
+    JunRAM
+};
+
 
 --- END OF FILE index.js ---
 
@@ -345,7 +365,7 @@ import { JunMap } from "./core/JunMap.js";
     depth: 2,
     folder: './data',
     memory: 20,
-    index: {
+    maps: {
         threshold: 10,
         debounce: 5000
     },
@@ -365,7 +385,7 @@ export class JunDB {
         this.#options = options;
 
         this.JunDrive = new JunDrive({
-            memory: options.memory || 20,
+            memory: options.memory || 50,
             folder: options.folder || './data',
             atomic: options.atomic
         });
@@ -373,8 +393,8 @@ export class JunDB {
         this.map = new JunMap(
             this.JunDrive, 'root.map.bin', {
             file: {
-                limit: options.index?.threshold || 10,
-                delay: options.index?.debounce || 5000
+                limit: options.maps?.threshold || 10,
+                delay: options.maps?.debounce || 5000
             }
         })
 
@@ -420,8 +440,8 @@ export class JunDB {
         if (!a0) return false;
         if (!(a0?.$file)) return false;
 
-        let limit = this.#options.index?.threshold || 10;
-        let delay = this.#options.index?.debounce || 5000;
+        let limit = this.#options?.maps?.threshold || 10;
+        let delay = this.#options?.maps?.debounce || 5000;
 
         const mapInstance = new this.map
             .constructor(this.JunDrive, a0.$file,
@@ -590,14 +610,14 @@ export class JunDrive {
         this.syncIO = new SyncIO(options.folder, options.atomic);
         this.asyncIO = new AsyncIO(options.folder, options.atomic);
 
-        this.flowRam = new JunRAM(options // memory 0.5%
-            .memory * 0.005, ['root.flow.bin']);
+        this.flowRam = new JunRAM(options // memory 2%
+            .memory * 0.02, ['root.flow.bin']);
 
         this.mapsRam = new JunRAM(options // memory 10%
             .memory * 0.10, ['root.map.bin']);
 
-        this.nodesRam = new JunRAM(options // memory 89.5% 
-            .memory * 0.895, ['root.node.bin']);
+        this.nodesRam = new JunRAM(options // memory 88% 
+            .memory * 0.88, ['root.node.bin']);
 
         if (!options.folder) options.folder = './data';
 
@@ -911,7 +931,7 @@ export class AsyncIO {
 import v8 from 'v8';
 
 export class JunRAM {
-    constructor(limitMB = 20, pinnedKeys = []) {
+    constructor(limitMB = 50, pinnedKeys = []) {
         this.limit = Number(limitMB) * 1024 * 1024;
         this.pinnedKeys = new Set(pinnedKeys);
         this.pinned = new Map();
@@ -1103,7 +1123,7 @@ export class JunShard {
 
 {
   "name": "jun-db",
-  "version": "1.0.2",
+  "version": "2.0.0",
   "description": "Minimalist NoSQL sharded database for Node.js. High-performance binary storage that feels like a native JS object via transparent Proxies. Zero dependencies and atomic I/O.",
   "main": "index.js",
   "type": "module",
