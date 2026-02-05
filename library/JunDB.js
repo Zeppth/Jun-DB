@@ -139,17 +139,17 @@ export class JunDB {
                 if (typeof key === 'symbol')
                     return Reflect.get(target, key);
 
-                if (key === '$flow') return {
-                    set: (k, v) => root.JunFlow.set(k, v),
-                    get: (k, k2) => root.JunFlow.get(k, k2),
-                    delete: (k, k2) => root.JunFlow.delete(k, k2),
-                    data: root.JunFlow.data
-                };
+                if (key === '$setProxy') return (o) => root.JunFlow.set('proxy', o)
+                if (key === '$delProxy') return (key) => root.JunFlow.delete('proxy', key)
 
-                const flow = root.JunFlow.get('call');
+                if (key === '$setCall') return (o) => root.JunFlow.set('call', o)
+                if (key === '$delCall') return (key) => root.JunFlow.delete('call', key)
+
+                const flow = root.JunFlow.isFlow
+                    ? (root.JunFlow.get('call')) : null;
 
                 // flow
-                if (root.JunFlow.isFlow && flow?.[key]) {
+                if (flow?.[key]) {
                     const fun = root.JunFlow.get('call', key);
 
                     if (typeof fun === 'function') {
@@ -187,8 +187,7 @@ export class JunDB {
                     const node = new JunMap(Jun.JunDrive,
                         rootGet.replace('node:', '').replace(
                             '.node.bin', '.map.bin'));
-                    return Jun.Proxy(node,
-                        flow?.[key]);
+                    return Jun.Proxy(node);
                 } else {
                     return rootGet;
                 }
