@@ -3,7 +3,7 @@
 import v8 from 'v8';
 
 export class JunRAM {
-    constructor(limitMB = 20, pinnedKeys = []) {
+    constructor(limitMB = 50, pinnedKeys = []) {
         this.limit = Number(limitMB) * 1024 * 1024;
         this.pinnedKeys = new Set(pinnedKeys);
         this.pinned = new Map();

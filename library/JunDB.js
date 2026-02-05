@@ -8,7 +8,7 @@ import { JunMap } from "./core/JunMap.js";
     depth: 2,
     folder: './data',
     memory: 20,
-    index: {
+    maps: {
         threshold: 10,
         debounce: 5000
     },
@@ -28,7 +28,7 @@ export class JunDB {
         this.#options = options;
 
         this.JunDrive = new JunDrive({
-            memory: options.memory || 20,
+            memory: options.memory || 50,
             folder: options.folder || './data',
             atomic: options.atomic
         });
@@ -36,8 +36,8 @@ export class JunDB {
         this.map = new JunMap(
             this.JunDrive, 'root.map.bin', {
             file: {
-                limit: options.index?.threshold || 10,
-                delay: options.index?.debounce || 5000
+                limit: options.maps?.threshold || 10,
+                delay: options.maps?.debounce || 5000
             }
         })
 
@@ -83,8 +83,8 @@ export class JunDB {
         if (!a0) return false;
         if (!(a0?.$file)) return false;
 
-        let limit = this.#options.index?.threshold || 10;
-        let delay = this.#options.index?.debounce || 5000;
+        let limit = this.#options?.maps?.threshold || 10;
+        let delay = this.#options?.maps?.debounce || 5000;
 
         const mapInstance = new this.map
             .constructor(this.JunDrive, a0.$file,

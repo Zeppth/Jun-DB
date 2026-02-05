@@ -20,14 +20,14 @@ export class JunDrive {
         this.syncIO = new SyncIO(options.folder, options.atomic);
         this.asyncIO = new AsyncIO(options.folder, options.atomic);
 
-        this.flowRam = new JunRAM(options // memory 0.5%
-            .memory * 0.005, ['root.flow.bin']);
+        this.flowRam = new JunRAM(options // memory 2%
+            .memory * 0.02, ['root.flow.bin']);
 
         this.mapsRam = new JunRAM(options // memory 10%
             .memory * 0.10, ['root.map.bin']);
 
-        this.nodesRam = new JunRAM(options // memory 89.5% 
-            .memory * 0.895, ['root.node.bin']);
+        this.nodesRam = new JunRAM(options // memory 88% 
+            .memory * 0.88, ['root.node.bin']);
 
         if (!options.folder) options.folder = './data';
 
