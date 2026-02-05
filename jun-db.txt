@@ -1,16 +1,21 @@
 ================================================
 ESTRUCTURA DEL PROYECTO Y CÓDIGO FUENTE
-Generado el: 13/1/2026, 12:49:09
+Generado el: 5/2/2026, 18:25:08
 ================================================
 
 MAPA DE DIRECTORIOS:
 .
 ├── index.js
 ├── library/
+│   ├── core/
+│   │   ├── JunDoc.js
+│   │   ├── JunFlow.js
+│   │   ├── JunHub.js
+│   │   ├── JunMap.js
+│   │   └── JunNode.js
 │   ├── JunDB.js
 │   ├── JunDrive.js
-│   ├── JunFlow.js
-│   ├── JunHub.js
+│   ├── JunIO.js
 │   ├── JunRAM.js
 │   └── JunShard.js
 ├── package.json
@@ -25,546 +30,34 @@ CONTENIDO DE LOS ARCHIVOS
 
 // index.js
 import { JunDB } from './library/JunDB.js';
+import { JunDoc } from './library/core/JunDoc.js';
+import { JunFlow } from './library/core/JunFlow.js';
+import { JunHub } from './library/core/JunHub.js';
+import { JunMap } from './library/core/JunMap.js';
+import { JunNode } from './library/core/JunNode.js';
 import { JunShard } from './library/JunShard.js';
-import { JunDoc, JunMap, JunHub } from './library/JunHub.js';
-import { JunFlow } from './library/JunFlow.js';
-import { JunRAM } from './library/JunRAM.js';
 import { JunDrive } from './library/JunDrive.js';
+import { JunRAM } from './library/JunRAM.js';
 
 export {
     JunDB,
-    JunShard,
     JunDoc,
-    JunMap,
-    JunHub,
     JunFlow,
-    JunRAM,
-    JunDrive
-}
+    JunHub,
+    JunMap,
+    JunNode,
+    JunShard,
+    JunDrive,
+    JunRAM
+};
+
 
 --- END OF FILE index.js ---
 
 
---- START OF FILE library\JunDB.js ---
+--- START OF FILE library\core\JunDoc.js ---
 
-// ./library/JunDB.js
-
-import { JunDrive } from "./JunDrive.js";
-import { JunMap, JunHub } from "./JunHub.js";
-import { JunFlow } from "./JunFlow.js";
-
-/*new JunDB({
-    depth: 2,
-    folder: './data',
-    memory: 20,
-    index: {
-        threshold: 10,
-        debounce: 5000
-    },
-    nodes: {
-        threshold: 5,
-        debounce: 3000
-    }
-})*/
-
-export class JunDB {
-    #options = null;
-    constructor(options = {}) {
-        if (options?.constructor?.name !== 'Object') {
-            throw new Error('Invalid options');
-        }
-
-        this.#options = options;
-
-        // class JunDrive
-        if (options.$class?.JunDrive) {
-            const a0 = options.$class.JunDrive;
-            if (a0.constructor.name == 'Array') {
-                this.JunDrive = new JunDrive(...a0);
-            } else if (a0.constructor.name == 'Object') {
-                this.JunDrive = new JunDrive(a0);
-            } else this.JunDrive = a0
-        }
-
-        if (!this.JunDrive) {
-            this.JunDrive = new JunDrive({
-                memory: { limit: options.memory || 20 },
-                folder: options.folder || './data',
-            });
-        }
-
-        // class JunMap
-        if (options.$class?.JunMap) {
-            const a0 = options.$class.JunMap;
-            if (a0.constructor.name == 'Array') {
-                this.index = new JunMap(this.JunDrive, ...a0);
-            } else if (a0.constructor.name == 'Object') {
-                this.index = new JunMap(this.JunDrive, a0);
-            } else this.index = a0
-        }
-
-        if (!this.index) {
-            this.index = new JunMap(this.JunDrive, {
-                file: {
-                    limit: options.index?.threshold || 10,
-                    delay: options.index?.debounce || 5000
-                }
-            })
-        }
-
-        // class JunFlow
-        if (options.$class?.JunFlow) {
-            const a0 = options.$class.JunFlow;
-            if (a0.constructor.name == 'Array') {
-                this.flow = new JunFlow(...a0);
-            } else this.flow = a0
-        }
-
-        if (!this.flow) {
-            this.flow = new JunFlow();
-        }
-
-        /////////////////////////////
-
-        this.proxies = new WeakMap();
-        this.flows = new WeakMap();
-
-        this.data = this.Proxy(
-            this.index.data);
-
-        this.shared = {}
-    }
-
-    memory() {
-        return this.JunDrive
-            .RAM.stats()
-    }
-
-    flush() {
-        return this.JunDrive
-            .flush()
-    }
-
-    open(...path) {
-        const o = this.index.get(...path)
-        const router = this.flow.get(...path)
-        if (o && o.$file) return this.Proxy(o, router)
-        return false
-    }
-
-    Proxy(index, flow) {
-        const Jun = this
-        if (!index) index = this.index.data;
-        if (index.$file == 'root.bin')
-            flow = this.flow.tree
-
-        if (flow) this.flows.set(index, flow);
-
-        if (this.proxies.has(index))
-            return this.proxies.get(index);
-
-        let root = null;
-
-        // class JunHub
-        if (this.#options?.$class?.JunHub) {
-            const a0 = this.#options.$class.JunHub;
-            if (a0.constructor.name === 'Array') {
-                root = new JunHub(this.JunDrive, index, ...a0);
-            } else if (a0.constructor.name === 'Object') {
-                root = new JunHub(this.JunDrive, index, a0);
-            } else root = a0;
-        }
-
-        if (!root) root = new JunHub(this.JunDrive, index, {
-            shard: { depth: this.#options?.depth || 2 },
-            file: {
-                limit: this.#options?.nodes?.threshold || 5,
-                delay: this.#options?.nodes?.debounce || 3000
-            }
-        });
-
-        ////////////////////////////
-
-        const open = (args, index, flow) => {
-            const Open = (object) => () => args.reduce(
-                (acc, k) => acc?.[k], object) ?? false;
-            const $index = Open(index)();
-            const $flow = Open(flow)();
-            if ($index && $index.$file)
-                return this.Proxy($index,
-                    $flow)
-        }
-
-        const guard = (method) => (...args) => {
-            if (flow?.$proxy && flow?.$proxy?.[method]) {
-                let control = { end: false, value: null, error: null };
-                const receiver = (method === 'delete') ? null
-                    : args[args.length - 1];
-
-                flow.$proxy[method].apply({
-                    resolve: (val) => { control.end = true; control.value = val },
-                    reject: (err) => { control.end = true; control.error = err },
-                    open: (...args) => open(args, index, flow),
-                    data: receiver, index: index, flow: flow,
-                }, args);
-
-                return control
-            }
-        }
-
-        const proxy = new Proxy({}, {
-            get(target, key, receiver) {
-                if (typeof key === 'symbol')
-                    return Reflect.get(target, key);
-
-                const flow = Jun.flows.get(index);
-
-                // flow
-                if (flow?.$call && flow?.$call?.[key]) {
-                    const fun = flow.$call[key];
-                    if (typeof fun === 'function') {
-                        return (...args) => fun.apply({
-                            data: receiver, index: index, flow: flow,
-                            open: (...args) => open(args, index, flow),
-                            Jun: Jun
-                        }, args);
-                    }
-                } else if (Jun.shared[key]) {
-                    const fun = Jun.shared[key];
-                    if (typeof fun === 'function') {
-                        return (...args) => fun.apply({
-                            data: receiver, index: index, flow: flow,
-                            open: (...args) => open(args, index, flow),
-                            Jun: Jun
-                        }, args);
-                    }
-                }
-
-                const r = guard('get')(target, key, receiver);
-                if (r?.end && r?.error) throw r.error;
-                if (r?.end) return r.value;
-
-                // index
-                const rootGet = root.get(key);
-
-                if (rootGet?.constructor?.name
-                    === 'Object' && rootGet.$file) {
-                    return Jun.Proxy(index[key],
-                        flow?.[key]);
-                } else {
-                    return rootGet;
-                }
-            },
-            set(target, key, value, receiver) {
-                const r = guard('set')(
-                    target, key, value, receiver);
-
-                if (r?.end && r?.error) throw r.error;
-                if (r?.end) return r.value;
-
-                root.set(key, value);
-                Jun.index.save();
-                return true;
-            },
-            deleteProperty(target, key) {
-                const r = guard('delete')(target, key);
-                if (r?.end && r?.error) throw r.error;
-                if (r?.end) return r.value;
-
-                root.delete(key);
-                Jun.index.save();
-                return true;
-            },
-            ownKeys(target) {
-                return root.keys();
-            },
-
-            getOwnPropertyDescriptor(_, key) {
-                return {
-                    enumerable: true,
-                    configurable: true,
-                    value: root.get(key)
-                };
-            }
-        })
-
-        this.proxies.set(
-            index, proxy);
-        return proxy;
-    }
-}
-
---- END OF FILE library\JunDB.js ---
-
-
---- START OF FILE library\JunDrive.js ---
-
-// ./library/JunDrive.js
-
-import fs from 'fs';
-import fsp from 'fs/promises';
-import path from 'path';
-import v8 from 'v8';
-
-import { JunRAM } from './JunRAM.js';
-
-export class JunDrive {
-    constructor(options = {}) {
-        if (options.constructor.name !== 'Object')
-            throw new Error('Invalid options');
-
-        if (options?.$class?.JunRAM) {
-            const a0 = options.$class.JunRAM;
-            if (a0.constructor.name == 'Array') {
-                this.RAM = new JunRAM(...a0);
-            } else this.RAM = a0
-        }
-
-        if (!options.folder)
-            options.folder = './data';
-
-        if (!this.RAM) this.RAM = new JunRAM(
-            options.memory?.limit || 20,
-            ['index.bin', 'root.bin']);
-
-        this.onError = options.onError || ((err) =>
-            console.error(`[JunDB_Internal_Error]:`, err));
-
-        this.Pipe = new Map();
-        this.basePath = path.resolve(options.folder);
-        this.dataPath = path.join(this.basePath, 'data');
-        this.files = ['index.bin', 'root.bin']
-
-        if (!fs.existsSync(this.basePath)) {
-            fs.mkdirSync(this.basePath,
-                { recursive: true });
-        }
-
-        if (!fs.existsSync(this.dataPath)) {
-            fs.mkdirSync(this.dataPath,
-                { recursive: true });
-        }
-    }
-
-    #path(filename) {
-        if (!this.files.includes(filename))
-            return path.join(this.dataPath, filename);
-        return path.join(this.basePath, filename);
-    }
-
-    //////////////////////
-
-    readSync(filename) {
-        const cached = this.RAM.get(filename);
-
-        if (cached) return cached;
-
-        const filePath = this.#path(filename);
-
-        try {
-            const buffer = fs.readFileSync(filePath);
-            const data = v8.deserialize(buffer);
-            this.RAM.set(filename, data);
-            return data;
-        } catch (e) {
-            this.onError(e);
-            return null;
-        }
-    }
-
-    writeSync(filename, data = {}) {
-        const filePath = this.#path(filename);
-        try {
-            const dir = path.dirname(filePath);
-
-            if (!fs.existsSync(dir)) {
-                fs.mkdirSync(dir, { recursive: true });
-            }
-
-            const tempPath = filePath + '.tmp';
-            const buffer = v8.serialize(data);
-            const fd = fs.openSync(tempPath, 'w');
-            fs.writeSync(fd, buffer);
-            fs.fsyncSync(fd);
-            fs.closeSync(fd);
-            fs.renameSync(tempPath, filePath);
-            this.RAM.set(filename, data);
-            return true;
-        } catch (e) {
-            this.onError(e);
-            return false;
-        }
-    }
-
-    removeSync(filename) {
-        const filePath = this
-            .#path(filename);
-
-        try {
-            if (fs.existsSync(filePath)) fs.rmSync(filePath,
-                { recursive: true, force: true });
-            this.RAM.delete(filename);
-            return true;
-        } catch (e) {
-            this.onError(e);
-            return false;
-        }
-    }
-
-
-    existsSync(filename) {
-        if (this.RAM.has(filename)) return true;
-        return fs.existsSync(this.#path(filename));
-    }
-
-
-    //////////////////////
-
-    async #pipe(filename, action) {
-        const next = (this.Pipe.get(filename) || Promise.resolve())
-            .then(() => action().catch((e) => this.onError(e))).finally(() =>
-                (this.Pipe.get(filename) === next) ? this.Pipe.delete(filename) : false);
-        return this.Pipe.set(filename, next).get(filename);
-    }
-
-
-    async read(filename) {
-        const cached = this
-            .RAM.get(filename);
-        if (cached) return cached;
-
-        return this.#pipe(filename, async () => {
-            const filePath = this.#path(filename);
-
-            try {
-                const buffer = await fsp.readFile(filePath);
-                const data = v8.deserialize(buffer);
-                this.RAM.set(filename, data);
-                return data;
-            } catch (e) {
-                return null;
-            }
-        });
-    }
-
-    async write(filename, data = {}) {
-        this.RAM.set(filename, data);
-        return this.#pipe(filename, async () => {
-            const filePath = this.#path(filename);
-            const dir = path.dirname(filePath);
-            await fsp.mkdir(dir, { recursive: true });
-            const tempPath = filePath + '.tmp';
-            const buffer = v8.serialize(data);
-            const handle = await fsp.open(tempPath, 'w');
-            await handle.write(buffer);
-            await handle.sync();
-            await handle.close();
-            await fsp.rename(tempPath, filePath);
-            return true;
-        });
-    }
-
-    async remove(filename) {
-        this.RAM.delete(filename);
-        return this.#pipe(filename, async () => {
-            const filePath = this.#path(filename);
-            await fsp.rm(filePath, {
-                recursive: true,
-                force: true
-            });
-            return true;
-        });
-    }
-
-    async exists(filename) {
-        if (this.RAM.has(filename)) return true;
-        try {
-            await fsp.access(this.#path(filename));
-            return true;
-        } catch {
-            return false;
-        }
-    }
-
-    async flush() {
-        await Promise.all(this.Pipe.values());
-        return true;
-    }
-
-    async prune() {
-        return this.#pipe('__maint__', async () => {
-            const scan = async (d) => {
-                const items = await fsp.readdir(d,
-                    { withFileTypes: true });
-                for (const i of items) if (i.isDirectory())
-                    await scan(path.join(d, i.name));
-                if (d !== this.dataPath && d !== this.basePath &&
-                    !(await fsp.readdir(d)).length)
-                    await fsp.rmdir(d).catch(() => null);
-            };
-
-            if (fs.existsSync(this.dataPath))
-                await scan(this.dataPath);
-        });
-    }
-}
-
---- END OF FILE library\JunDrive.js ---
-
-
---- START OF FILE library\JunFlow.js ---
-
-// ./library/JunFlow.js
-
-export class JunFlow {
-    constructor() {
-        this.tree = {};
-    }
-
-    forge(...args) {
-        const val = args.pop();
-        return args.reduceRight((acc, key) =>
-            ({ [key]: acc }), val);
-    }
-
-    get(...args) {
-        return args.reduce((acc, k) =>
-            acc?.[k], this.tree) ?? false;
-    }
-
-    set(...args) {
-        const val = args.pop();
-        const target = args.reduce((acc, k) =>
-            acc[k] ??= {}, this.tree);
-        const merge = (t, s) => Object.keys(s).forEach(k =>
-            (s[k] instanceof Object && k in t)
-                ? merge(t[k], s[k]) : t[k] = s[k]);
-        merge(target, val);
-    }
-
-    delete(...args) {
-        const del = (obj, [k, ...rest]) => {
-            if (!obj?.[k]) return false;
-            const success = rest.length ? del(obj[k], rest)
-                : (delete obj[k].$proxy, delete obj[k].$call, true);
-            if (success && !Object.keys(obj[k]).length)
-                delete obj[k];
-            return success;
-        };
-        return del(this.tree,
-            args);
-    }
-}
-
-
---- END OF FILE library\JunFlow.js ---
-
-
---- START OF FILE library\JunHub.js ---
-
-// ./library/JunHub.js
-
-import { JunShard } from "./JunShard.js";
+// ./library/core/JunDoc.js
 
 export class JunDoc {
     #count = 0;
@@ -572,7 +65,6 @@ export class JunDoc {
     constructor(JunDrive, file, options = {}) {
         this.file = file;
         this.JunDrive = JunDrive;
-
         this._limit = options.limit ?? 10;
         this._delay = options.delay ?? 5000;
     }
@@ -581,7 +73,7 @@ export class JunDoc {
         if (this.JunDrive.existsSync(this.file)) {
             return this.JunDrive.readSync(this.file);
         } else {
-            this.JunDrive.writeSync(this.file, {});
+            this.JunDrive.write(this.file, {});
             return this.JunDrive.readSync(this.file)
         }
     }
@@ -603,138 +95,176 @@ export class JunDoc {
     }
 }
 
-export class JunMap {
-    constructor(JunDrive, options = {}) {
+--- END OF FILE library\core\JunDoc.js ---
+
+
+--- START OF FILE library\core\JunFlow.js ---
+
+// ./library/core/JunFlow.js
+
+import { JunShard } from '../JunShard.js';
+import { JunDoc } from './JunDoc.js';
+
+export class JunFlow {
+    #options = null
+    constructor(JunDrive, JunMap, options = {}) {
+        this.afile = null;
+        this.efile = null;
         this.JunDrive = JunDrive;
+        this.#options = options;
+        this.JunMap = JunMap;
 
-        // class JunDoc
-        if (options?.$class?.JunDoc) {
-            const a0 = options.$class.JunDoc;
-            if (a0.constructor.name === 'Array') {
-                this.file = new JunDoc(JunDrive,
-                    'index.bin', ...a0);
-            } else if (a0.constructor.name === 'Object') {
-                this.file = new JunDoc(JunDrive,
-                    'index.bin', a0);
-            } else this.file = a0;
+        if (JunDrive.existsSync(JunMap.fileFlow)) {
+            this.afile = new JunDoc(
+                JunDrive, JunMap.fileFlow, {
+                limit: options?.file?.limit || 2,
+                delay: options.file?.delay || 3000
+            })
         }
-
-        if (!this.file) {
-            this.file = new JunDoc(JunDrive, 'index.bin', {
-                limit: options?.file?.limit || 10,
-                delay: options.file?.delay || 5000
-            });
-        }
-
-        this.data = this.file.data;
-        if (!this.data.$file) {
-            this.data.$file = 'root.bin';
-            this.save();
-        }
-    }
-
-    get(...args) {
-        return args.reduce((acc, k) =>
-            acc?.[k], this.data) ?? false;
     }
 
     save() {
         return this.file.save();
     }
-}
 
-export class JunHub {
-    constructor(JunDrive, JunMap, options = {}) {
-        this.JunDrive = JunDrive;
-        this.JunMap = JunMap;
+    get isFlow() {
+        return this.afile ? true
+            : this.efile ? true
+                : false;
+    }
 
-        // class JunShard
-        if (options.$class?.JunShard) {
-            const a0 = options.$class.JunShard;
-            if (a0.constructor.name === 'Array') {
-                this.JunShard = new JunShard(JunDrive, ...a0);
-            } else if (a0.constructor.name === 'Number') {
-                this.JunShard = new JunShard(JunDrive, a0);
-            } else this.JunShard = a0;
-        }
+    get file() {
+        if (this.efile) return this.efile;
+        if (this.afile) return this.afile;
 
-        // class JunDoc
-        if (options?.$class?.JunDoc) {
-            const a0 = options.$class.JunDoc;
-            if (a0.constructor.name === 'Array') {
-                this.file = new JunDoc(JunDrive,
-                    this.JunMap.$file, ...a0);
-            } else if (a0.constructor.name === 'Object') {
-                this.file = new JunDoc(JunDrive,
-                    this.JunMap.$file, a0);
-            } else this.file = a0;
-        }
+        this.efile = new JunDoc(
+            this.JunDrive, this.JunMap.fileFlow, {
+            limit: this.#options?.file?.limit || 2,
+            delay: this.#options?.file?.delay || 3000
+        })
 
-        if (!this.JunShard) {
-            this.JunShard = new JunShard(
-                JunDrive, options?.shard?.depth || 2);
-        }
-
-        if (!this.file) {
-            this.file = new JunDoc(JunDrive, this.JunMap.$file, {
-                limit: options?.file?.limit || 5,
-                delay: options.file?.delay || 3000
-            });
-        }
+        return this.efile;
     }
 
     get data() {
-        return this.file.data;
+        return this.file.data
+    }
+
+    get(key, key2) {
+        if (!this.data[key]) return;
+
+        const a0 = (o) => {
+            if (typeof o !== 'string') return o;
+            try { return eval(`(${o})`); } catch (e) {
+                try { return eval(`(function ${o})`) }
+                catch (e2) { return o }
+            }
+        };
+
+        if (this.data[key] && !key2) {
+            const v = {};
+            for (const k in this.data[key]) {
+                v[k] = a0(this.data[key][k]);
+            }
+            return v;
+        } else if (this.data[key]?.[key2]) {
+            return a0(this.data[key][key2]);
+        }
+    }
+
+    set(key, value) {
+        if (!JunShard.isObject(value)) return false;
+        const target = (this.data[key] ||= {});
+        for (const key in value) {
+            if (typeof value[key] === 'function')
+                target[key] = value[key].toString();
+            else continue;
+        }
+        this.file.save()
+        return true;
+    }
+
+    delete(key1, key2) {
+        if (!this.data[key1]) return;
+        if (this.data[key1] && !key2)
+            delete this.data[key1];
+        else if (this.data[key1]?.[key2]) {
+            delete this.data[key1][key2];
+            const keys = Object.keys(
+                this.data[key1]);
+            if (keys.length === 0)
+                delete this.data[key1];
+        }
+
+        this.file.save();
+        return true;
+    }
+}
+
+--- END OF FILE library\core\JunFlow.js ---
+
+
+--- START OF FILE library\core\JunHub.js ---
+
+// ./library/core/JunHub.js
+
+import { JunShard } from '../JunShard.js';
+import { JunFlow } from './JunFlow.js';
+import { JunNode } from './JunNode.js';
+
+
+export class JunHub {
+    constructor(JunDrive, JunMap, options = {}) {
+        this.JunMap = JunMap
+        this.JunDrive = JunDrive
+
+        this.JunFlow = new JunFlow(JunDrive, JunMap)
+        this.JunNode = new JunNode(JunDrive, JunMap, options)
+
+        this.JunShard = new JunShard(
+            JunDrive, JunMap, this.JunNode)
+    }
+
+    get data() {
+        return this.JunNode.data;
     }
 
     get(key) {
         const value = this.data[key];
-        if (typeof value === 'string' && value.endsWith('.bin')) {
-            if (!this.JunMap[key]) this.JunMap[key] = { $file: value };
-            return { $file: value }
+
+        if (typeof value === 'string'
+            && value.startsWith('node:')
+            && value.endsWith('.node.bin')
+            && this.JunMap.get(value)) {
+            this.JunMap.set(key, value);
         }
+
         return value;
     }
 
     set(key, value) {
-        if (this.JunMap[key]) {
-            this.JunShard.purge(this.JunMap[key]);
-            delete this.JunMap[key];
-        }
+        if (this.JunMap.get(key))
+            this.delete(key);
 
-        let isObject
-
-        if (value && typeof value === 'object') {
-            const proto = Object.getPrototypeOf(value);
-            isObject = (proto === Object.prototype
-                || proto === null);
-        }
-
-        if (isObject) {
-            let tmpIndex = {}
-            const file = this.JunShard.forge(
-                tmpIndex, value);
-
-            if (file) {
-                this.JunMap[key] = tmpIndex;
-                this.data[key] = file;
-            } else {
-                return false;
-            }
+        if (JunShard.isObject(value)) {
+            this.JunShard.forge({ [key]: value },
+                this.JunMap, this.JunNode);
         } else {
             this.data[key] = value;
+            this.JunNode.file.save();
         }
-
-        this.file.save();
     }
 
     delete(key) {
-        if (this.JunMap[key]) {
-            this.JunShard.purge(this.JunMap[key]);
-            delete this.JunMap[key];
+        const map = this.JunMap.get(key);
+
+        if (map) {
+            this.JunShard.purge(map);
+            this.JunMap.delete(key);
         }
+
         delete this.data[key];
-        this.file.save();
+        this.JunNode.file.save();
     }
 
     keys() {
@@ -742,7 +272,655 @@ export class JunHub {
     }
 }
 
---- END OF FILE library\JunHub.js ---
+--- END OF FILE library\core\JunHub.js ---
+
+
+--- START OF FILE library\core\JunMap.js ---
+
+// ./library/core/JunMap.js
+
+import { JunDoc } from "./JunDoc.js";
+
+export class JunMap {
+    constructor(JunDrive, file, options = {}) {
+        this.JunDrive = JunDrive;
+
+        this.fileMap = file
+        this.fileFlow = this.fileMap.replace(
+            '.map.bin', '.flow.bin');
+            
+        this.fileNode = this.fileMap.replace(
+            '.map.bin', '.node.bin');
+
+        this.file = new JunDoc(JunDrive, this.fileMap, {
+            limit: options?.file?.limit || 10,
+            delay: options.file?.delay || 5000
+        });
+    }
+
+    save() { return this.file.save(); }
+    keys() { return Object.keys(this.data); }
+    get data() { return this.file.data; }
+    get(key) { return this.data[key] }
+
+    set(key, value) {
+        this.data[key] = value;
+
+        this.file.save();
+    }
+
+    delete(key) {
+        delete this.data[key];
+        this.file.save();
+    }
+}
+
+--- END OF FILE library\core\JunMap.js ---
+
+
+--- START OF FILE library\core\JunNode.js ---
+
+// ./library/core/JunNode.js
+
+import { JunDoc } from "./JunDoc.js";
+
+export class JunNode {
+    constructor(JunDrive, JunMap, options = {}) {
+        this.JunDrive = JunDrive;
+        this.file = new JunDoc(
+            JunDrive, JunMap.fileNode, {
+            limit: options?.file?.limit || 10,
+            delay: options.file?.delay || 5000
+        });
+    }
+
+    save() { return this.file.save(); }
+    keys() { return Object.keys(this.data); }
+    get data() { return this.file.data; }
+    get(key) { return this.data[key] }
+
+    set(key, value) {
+        this.data[key] = value;
+        this.file.save();
+    }
+
+    delete(key) {
+        delete this.data[key];
+        this.file.save();
+    }
+}
+
+--- END OF FILE library\core\JunNode.js ---
+
+
+--- START OF FILE library\JunDB.js ---
+
+// ./library/JunDB.js
+
+import { JunDrive } from "./JunDrive.js";
+import { JunHub } from "./core/JunHub.js";
+import { JunMap } from "./core/JunMap.js";
+
+/*new JunDB({
+    depth: 2,
+    folder: './data',
+    memory: 20,
+    maps: {
+        threshold: 10,
+        debounce: 5000
+    },
+    nodes: {
+        threshold: 5,
+        debounce: 3000
+    }
+})*/
+
+export class JunDB {
+    #options = null;
+    constructor(options = {}) {
+        if (options?.constructor?.name !== 'Object') {
+            throw new Error('Invalid options');
+        }
+
+        this.#options = options;
+
+        this.JunDrive = new JunDrive({
+            memory: options.memory || 50,
+            folder: options.folder || './data',
+            atomic: options.atomic
+        });
+
+        this.map = new JunMap(
+            this.JunDrive, 'root.map.bin', {
+            file: {
+                limit: options.maps?.threshold || 10,
+                delay: options.maps?.debounce || 5000
+            }
+        })
+
+        this.proxies = new WeakMap();
+        this.data = this.Proxy(
+            this.map);
+
+        this.shared = {}
+    }
+
+    memory() {
+        return {
+            maps: this.JunDrive.mapsRam.stats(),
+            nodes: this.JunDrive.nodesRam.stats(),
+            flow: this.JunDrive.flowRam.stats()
+        }
+    }
+
+    flush() {
+        return this.JunDrive
+            .flush()
+    }
+
+    open(...path) {
+        if (!path.length) return;
+        let a0 = this.map.data;
+
+        path = path.filter((o) => {
+            if (typeof o == 'string') return true;
+            else if (o instanceof this.map.constructor) {
+                a0 = o.data; return false;
+            } else return false;
+        });
+
+        for (let i = 0; i < path.length; i++) {
+            if (!a0[path[i]]) return false;
+            const file = a0[path[i]];
+            if (typeof file !== 'string') return false;
+            if (!file.endsWith('.map.bin')) return false;
+            a0 = this.JunDrive.readSync(file);
+        }
+
+        if (!a0) return false;
+        if (!(a0?.$file)) return false;
+
+        let limit = this.#options?.maps?.threshold || 10;
+        let delay = this.#options?.maps?.debounce || 5000;
+
+        const mapInstance = new this.map
+            .constructor(this.JunDrive, a0.$file,
+                { file: { limit: limit, delay: delay } });
+
+        return this.Proxy(mapInstance)
+    }
+
+    Proxy(map) {
+        if (!map?.data) return;
+
+        const Jun = this
+        const a0 = map.data;
+        const root = new JunHub(this.JunDrive, map, {
+            shard: { depth: this.#options?.depth || 2 },
+            file: {
+                limit: this.#options?.nodes?.threshold || 10,
+                delay: this.#options?.nodes?.debounce || 5000
+            }
+        });
+
+
+        ////////////////////////////
+
+        const open = (...args) => {
+            const _map = this.open(...args, map);
+            if (_map && _map.$file) return this.Proxy(_map)
+        }
+
+        const guard = (method) => (...args) => {
+            if (!root.JunFlow.isFlow) return;
+            const flow = root.JunFlow.get('proxy');
+
+            if (flow?.[method]) {
+                let control = { end: false, value: null, error: null };
+                const receiver = (method === 'delete') ? null
+                    : args[args.length - 1];
+
+                flow[method].apply({
+                    resolve: (val) => { control.end = true; control.value = val },
+                    reject: (err) => { control.end = true; control.error = err },
+                    open: (...args) => open(...args),
+                    data: receiver, map,
+                }, args);
+
+                return control
+            }
+        }
+
+        const proxy = new Proxy({}, {
+            get(target, key, receiver) {
+                if (typeof key === 'symbol')
+                    return Reflect.get(target, key);
+
+                if (key === '$setProxy') return (o) => root.JunFlow.set('proxy', o)
+                if (key === '$delProxy') return (key) => root.JunFlow.delete('proxy', key)
+
+                if (key === '$setCall') return (o) => root.JunFlow.set('call', o)
+                if (key === '$delCall') return (key) => root.JunFlow.delete('call', key)
+
+                const flow = root.JunFlow.isFlow
+                    ? (root.JunFlow.get('call')) : null;
+
+                // flow
+                if (flow?.[key]) {
+                    const fun = root.JunFlow.get('call', key);
+
+                    if (typeof fun === 'function') {
+                        return (...args) => fun.apply({
+                            data: receiver, index: map, flow: flow,
+                            open: (...args) => open(...args),
+                            Jun: Jun
+                        }, args);
+                    }
+                }
+
+                if (Jun.shared[key]) {
+                    const fun = Jun.shared[key];
+                    if (typeof fun === 'function') {
+                        return (...args) => fun.apply({
+                            data: receiver, index: map, flow: flow,
+                            open: (...args) => open(...args),
+                            Jun: Jun
+                        }, args);
+                    }
+                }
+
+                const r = guard('get')(
+                    target, key, receiver);
+
+                if (r?.end && r?.error) throw r.error;
+                if (r?.end) return r.value;
+
+                // ////////////////////////////
+
+                const rootGet = root.get(key);
+                if (typeof rootGet === 'string'
+                    && rootGet.startsWith('node:')) {
+                    const JunMap = Jun.map.constructor;
+                    const node = new JunMap(Jun.JunDrive,
+                        rootGet.replace('node:', '').replace(
+                            '.node.bin', '.map.bin'));
+                    return Jun.Proxy(node);
+                } else {
+                    return rootGet;
+                }
+            },
+            set(target, key, value, receiver) {
+                const r = guard('set')(
+                    target, key, value, receiver);
+                if (r?.end && r?.error) throw r.error;
+                root.set(key, (r?.end) ? r.value : value);
+                return true;
+            },
+            deleteProperty(target, key) {
+                const r = guard('delete')(target, key);
+                if (r?.end && r?.error) throw r.error;
+                if (r?.end) return r.value;
+                root.delete(key);
+                return true;
+            },
+            ownKeys(target) {
+                return root.keys();
+            },
+
+            getOwnPropertyDescriptor(_, key) {
+                return {
+                    enumerable: true,
+                    configurable: true,
+                    value: root.get(key)
+                };
+            }
+        })
+
+        this.proxies.set(
+            a0, proxy);
+        return proxy;
+    }
+}
+
+--- END OF FILE library\JunDB.js ---
+
+
+--- START OF FILE library\JunDrive.js ---
+
+// ./library/JunDrive.js
+
+import fs from 'fs';
+import fsp from 'fs/promises';
+import path from 'path';
+
+import { JunRAM } from './JunRAM.js';
+import { SyncIO, AsyncIO } from './JunIO.js';
+
+export class JunDrive {
+    constructor(options = {}) {
+        if (options.constructor.name !== 'Object')
+            throw new Error('Invalid options');
+
+        options.folder = options.folder || './data';
+        options.atomic = typeof options.atomic === 'boolean'
+            ? options.atomic : true;
+        options.memory = options.memory || 50;
+
+        this.syncIO = new SyncIO(options.folder, options.atomic);
+        this.asyncIO = new AsyncIO(options.folder, options.atomic);
+
+        this.flowRam = new JunRAM(options // memory 2%
+            .memory * 0.02, ['root.flow.bin']);
+
+        this.mapsRam = new JunRAM(options // memory 10%
+            .memory * 0.10, ['root.map.bin']);
+
+        this.nodesRam = new JunRAM(options // memory 88% 
+            .memory * 0.88, ['root.node.bin']);
+
+        if (!options.folder) options.folder = './data';
+
+        this.basePath = path.resolve(options.folder);
+        this.mapsPath = path.join(this.basePath, 'maps');
+        this.nodesPath = path.join(this.basePath, 'nodes');
+        this.flowPath = path.join(this.basePath, 'flows');
+
+        const folders = [
+            this.basePath, this.mapsPath,
+            this.nodesPath, this.flowPath
+        ]
+
+        folders.forEach(dir => {
+            if (!fs.existsSync(dir))
+                fs.mkdirSync(dir, {
+                    recursive: true
+                });
+        });
+    }
+
+    #a0(filename) {
+        if (filename?.endsWith('flow.bin')) return {
+            path: this.flowRam.pinnedKeys.has(filename)
+                ? path.join(this.basePath, filename)
+                : path.join(this.flowPath, filename),
+            ram: this.flowRam
+        }
+        else if (filename?.endsWith('map.bin')) return {
+            path: this.mapsRam.pinnedKeys.has(filename)
+                ? path.join(this.basePath, filename)
+                : path.join(this.mapsPath, filename),
+            ram: this.mapsRam
+        }
+        else if (filename?.endsWith('node.bin')) return {
+            path: this.nodesRam.pinnedKeys.has(filename)
+                ? path.join(this.basePath, filename)
+                : path.join(this.nodesPath, filename),
+            ram: this.nodesRam
+        }
+        else return new Error('Invalid filename');
+    }
+
+    //////////////////////
+
+    readSync(filename) {
+        const { ram, path } = this.#a0(filename);
+        const cached = ram.get(filename);
+        if (cached) return cached;
+        const data = this.syncIO.read(path);
+        ram.set(filename, data);
+        return data;
+
+    }
+
+    writeSync(filename, data = {}) {
+        const { ram, path } = this.#a0(filename);
+        ram.set(filename, data);
+        this.syncIO.write(path, data);
+        return true;
+    }
+
+    removeSync(filename) {
+        const { ram, path } = this.#a0(filename);
+        ram.delete(filename);
+        this.syncIO.remove(path);
+        return true;
+    }
+
+
+    existsSync(filename) {
+        const { ram, path } = this.#a0(filename);
+        if (ram.has(filename)) return true;
+        return this.syncIO.exists(path);
+    }
+
+    //////////////////////
+
+    async read(filename) {
+        const { ram, path } = this.#a0(filename);
+        const cached = ram.get(filename);
+        if (cached) return cached;
+        const data = await this.asyncIO.read(path);
+        ram.set(filename, data);
+        return data;
+    }
+
+    write(filename, data = {}) {
+        const { ram, path } = this.#a0(filename);
+        ram.set(filename, data);
+        return this.asyncIO.write(path, data);
+    }
+
+    remove(filename) {
+        const { ram, path } = this.#a0(filename);
+        ram.delete(filename);
+        return this.asyncIO.remove(path);
+    }
+
+    exists(filename) {
+        const { ram, path } = this.#a0(filename);
+        if (ram.has(filename)) return true;
+        return this.asyncIO.exists(path);
+    }
+
+    //////////////////////
+
+    async flush() {
+        return await this
+            .asyncIO.flush();
+    }
+
+    async prune() {
+        return this.asyncIO.queue('__maint__', async () => {
+            const scan = async (d) => {
+                const items = await fsp.readdir(d,
+                    { withFileTypes: true });
+                for (const i of items) if (i.isDirectory())
+                    await scan(path.join(d, i.name));
+                if (d !== this.nodesPath && d !== this.basePath &&
+                    !(await fsp.readdir(d)).length)
+                    await fsp.rmdir(d).catch(() => null);
+            };
+
+            if (fs.existsSync(this.flowPath))
+                await scan(this.flowPath);
+            if (fs.existsSync(this.nodesPath))
+                await scan(this.nodesPath);
+            if (fs.existsSync(this.mapsPath))
+                await scan(this.mapsPath);
+        });
+    }
+}
+
+
+--- END OF FILE library\JunDrive.js ---
+
+
+--- START OF FILE library\JunIO.js ---
+
+import fs from 'fs';
+import fsp from 'fs/promises';
+import path from 'path';
+import v8 from 'v8';
+
+export class SyncIO {
+    constructor(folder, atomic = true) {
+        this.base = folder;
+        this.atomic = atomic
+
+        if (!fs.existsSync(this.base)) fs
+            .mkdirSync(this.base, { recursive: true });
+    }
+
+    #catch(fn) {
+        try { return fn() } catch (e) {
+            console.error(e); return null
+        }
+    }
+
+    read(filePath) {
+        return this.#catch(() => {
+            const buffer = fs.readFileSync(filePath);
+            const data = v8.deserialize(buffer);
+            return data;
+        })
+    }
+
+    write(filePath, data = {}) {
+        return this.#catch(() => {
+            const dir = path.dirname(filePath);
+            if (!fs.existsSync(dir)) fs.mkdirSync(
+                dir, { recursive: true });
+
+            if (this.atomic) {
+                const tempPath = filePath + '.tmp';
+                const buffer = v8.serialize(data);
+                const fd = fs.openSync(tempPath, 'w');
+                fs.writeSync(fd, buffer);
+                // fs.fsyncSync(fd);
+                fs.closeSync(fd);
+                fs.renameSync(
+                    tempPath,
+                    filePath);
+                return true;
+            } else {
+                const buffer = v8.serialize(data);
+                fs.writeFileSync(filePath, buffer);
+                return true;
+            }
+        })
+    }
+
+    remove(filePath) {
+        return this.#catch(() => {
+            if (fs.existsSync(filePath)) fs.rmSync(filePath,
+                { recursive: true, force: true });
+            return true;
+        })
+    }
+
+
+    exists(filePath) {
+        return fs.existsSync(filePath);
+    }
+}
+
+///////////////////////
+
+export class AsyncIO {
+    #c0 = 0;
+    #q0 = [];
+
+    constructor(folder, atomic = true) {
+        this.base = folder;
+        this.atomic = atomic;
+        this.Pipe = new Map();
+
+        if (!fs.existsSync(this.base)) fs
+            .mkdirSync(this.base, { recursive: true });
+    }
+
+    async #a0(fn) {
+        if (this.#c0 >= 64)
+            await new Promise(r =>
+                this.#q0.push(r));
+        this.#c0++;
+        try { return await fn(); } finally {
+            this.#c0--;
+            if (this.#q0.length)
+                this.#q0.shift()();
+        }
+    }
+
+    async #e0(fn, r = 3) {
+        try { return await fn(); } catch (e) {
+            if ((e.code === 'ENOENT' || e.code === 'EMFILE') && r > 0) {
+                await new Promise(t => setTimeout(t, 20));
+                return this.#e0(fn, r - 1);
+            } else throw e;
+        }
+    }
+
+    async queue(filename, action) {
+        const next = (this.Pipe.get(filename) || Promise.resolve())
+            .then(() => this.#a0(action)).catch((e) => console.error(e)).finally(() =>
+                (this.Pipe.get(filename) === next) ? this.Pipe.delete(filename) : false);
+        return this.Pipe.set(filename, next).get(filename);
+    }
+
+    async read(filePath) {
+        return this.queue(filePath, async () => {
+            try {
+                const buffer = await fsp.readFile(filePath);
+                return v8.deserialize(buffer);
+            } catch (e) { return null }
+        });
+    }
+
+    async write(filePath, data = {}) {
+        return this.queue(filePath, async () => {
+            const dir = path.dirname(filePath);
+            const buffer = v8.serialize(data);
+            await this.#e0(() => fsp.mkdir(dir,
+                { recursive: true }));
+
+            if (this.atomic) {
+                const tempPath = filePath + '.tmp';
+                await this.#e0(() => fsp
+                    .writeFile(tempPath, buffer));
+                await this.#e0(() => fsp
+                    .rename(tempPath, filePath));
+                return true;
+            } else {
+                await this.#e0(() => fsp
+                    .writeFile(filePath, buffer));
+                return true;
+            }
+        })
+    }
+
+    async remove(filePath) {
+        return this.queue(filePath, async () => {
+            await this.#e0(() => fsp.rm(filePath, {
+                recursive: true, force: true
+            }));
+            return true;
+        });
+    }
+
+    async exists(filePath) {
+        return await fsp.access(filePath)
+            .then(() => true).catch(() => null)
+    }
+
+    async flush() {
+        await Promise.all(this.Pipe.values());
+        while (this.#c0 > 0 || this.#q0.length > 0)
+            await new Promise(r => setTimeout(r, 50));
+        return true;
+    }
+}
+
+--- END OF FILE library\JunIO.js ---
 
 
 --- START OF FILE library\JunRAM.js ---
@@ -752,8 +930,8 @@ export class JunHub {
 import v8 from 'v8';
 
 export class JunRAM {
-    constructor(limitMB = 20, pinnedKeys = []) {
-        this.limit = limitMB * 1024 * 1024;
+    constructor(limitMB = 50, pinnedKeys = []) {
+        this.limit = Number(limitMB) * 1024 * 1024;
         this.pinnedKeys = new Set(pinnedKeys);
         this.pinned = new Map();
         this.cache = new Map();
@@ -776,7 +954,7 @@ export class JunRAM {
 
         if (this.cache.has(key))
             this.delete(key);
-        
+
         const dataSize = this.#size(data);
         if (dataSize > this.limit) {
             console.warn(`[JunDB] ${key} >  ${this
@@ -821,11 +999,12 @@ export class JunRAM {
     }
 
     stats() {
+        const kb = this.currentSize / 1024;
+        const mb = this.currentSize / (1024 * 1024);
+
         return {
-            used: (this.currentSize / 1024
-                / 1024).toFixed(2) + " MB",
-            limit: (this.limit / 1024
-                / 1024).toFixed(2) + " MB",
+            used: mb < 0.01 ? `${kb.toFixed(2)} KB` : `${mb.toFixed(2)} MB`,
+            limit: (this.limit / (1024 * 1024)).toFixed(2) + " MB",
             items: this.cache.size
         };
     }
@@ -845,62 +1024,96 @@ export class JunRAM {
 
 import crypto from 'crypto';
 
-export const genId = (depth) => {
-    const id = crypto.randomBytes(4)
-        .toString('hex').toUpperCase();
-    if (!depth || depth <= 0) return `${id}.bin`
-    const folder = id.substring(0, depth);
-    return `${folder}/${id}.bin`;
-};
-
-function isShardable(val) {
-    if (!val || typeof val !== 'object') return false;
-    const proto = Object.getPrototypeOf(val);
-    return proto === Object.prototype || proto === null;
-}
-
 export class JunShard {
-    constructor(JunDrive, depth) {
+    constructor(JunDrive, JunMap, JunHub, depth) {
         this.JunDrive = JunDrive;
-        this.depth = depth;
+        this.JunMap = JunMap;
+        this.JunHub = JunHub;
+        this.depth = depth || 2;
     }
 
-    purge(index) {
-        if (index.$file) this.JunDrive
-            .remove(index.$file);
-        for (const key in index) {
-            if (key === '$file') continue;
-            if (index[key] && typeof index[key] === 'object')
-                this.purge(index[key]);
-        }
+   static isObject(any) {
+        if (!any) return false;
+        if (typeof any !== 'object') return false;
+        if (Array.isArray(any)) return false;
+        const proto = Object.getPrototypeOf(any);
+        return proto === Object.prototype
+            || proto === null;
     }
 
-    forge(index, value, file) {
-        try {
-            const Id = file || genId(this.depth);
-            value = structuredClone(value);
-            index.$file = Id;
+    genId(depth) {
+        depth = depth || this.depth;
+        const id = crypto.randomBytes(4)
+            .toString('hex').toUpperCase();
+        if (!depth || depth <= 0) return `${id}`
+        const folder = id.substring(0, depth);
+        return `${folder}/${id}`;
+    }
 
-            for (const key in value) {
-                 if (!isShardable(value[key])) continue;
-                 
-                index[key] = {};
-                value[key] = this.forge(
-                    index[key],
-                    value[key]);
+    forge(data, JunMap, JunHub) {
+        if (!JunShard.isObject(data)) return;
+
+        JunMap = JunMap || this.JunMap;
+        JunHub = JunHub || this.JunHub;
+
+        let mapContent = {};
+        let hubContent = {};
+
+        for (const key in data) {
+            const value = data[key];
+
+            if (JunShard.isObject(value)) {
+                const Id = this.genId();
+                const nodeFile = Id + '.node.bin';
+                const mapFile = Id + '.map.bin';
+
+                this.JunDrive.write(mapFile,
+                    { $file: mapFile });
+
+                const _JunMap = new this.JunMap
+                    .constructor(this.JunDrive, mapFile);
+
+                const _JunHub = new this.JunHub
+                    .constructor(this.JunDrive, _JunMap);
+
+                this.forge(value, _JunMap, _JunHub);
+
+                hubContent[key] = `node:${nodeFile}`;
+                mapContent[key] = mapFile;
+            } else {
+                hubContent[key] = value;
             }
-
-            this.JunDrive.write(
-                Id, value);
-            return Id;
-        } catch (e) {
-            this.JunDrive
-                .onError(e.message);
-            return null
         }
+
+        Object.assign(JunMap
+            .data, mapContent);
+        Object.assign(JunHub
+            .data, hubContent);
+
+        JunMap.file.save();
+        JunHub.file.save();
+    }
+
+    purge(mapPath) {
+        if (!mapPath) return;
+        if (typeof mapPath !== 'string') return;
+        if (!mapPath.endsWith('.map.bin')) return;
+        const mapData = this.JunDrive.readSync(mapPath);
+
+        if (!mapData) return;
+        for (const key in mapData) {
+            if (key === '$file') continue;
+            const childPath = mapData[key];
+            this.purge(childPath);
+        }
+
+        const nodePath = mapPath.replace(
+            '.map.bin', '.node.bin');
+
+        this.JunDrive.remove(mapPath);
+        this.JunDrive.remove(nodePath);
     }
 }
-
 
 --- END OF FILE library\JunShard.js ---
 
@@ -909,7 +1122,7 @@ export class JunShard {
 
 {
   "name": "jun-db",
-  "version": "1.0.2",
+  "version": "2.0.0",
   "description": "Minimalist NoSQL sharded database for Node.js. High-performance binary storage that feels like a native JS object via transparent Proxies. Zero dependencies and atomic I/O.",
   "main": "index.js",
   "type": "module",

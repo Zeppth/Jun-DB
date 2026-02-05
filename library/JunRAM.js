@@ -3,8 +3,8 @@
 import v8 from 'v8';
 
 export class JunRAM {
-    constructor(limitMB = 20, pinnedKeys = []) {
-        this.limit = limitMB * 1024 * 1024;
+    constructor(limitMB = 50, pinnedKeys = []) {
+        this.limit = Number(limitMB) * 1024 * 1024;
         this.pinnedKeys = new Set(pinnedKeys);
         this.pinned = new Map();
         this.cache = new Map();
@@ -27,7 +27,7 @@ export class JunRAM {
 
         if (this.cache.has(key))
             this.delete(key);
-        
+
         const dataSize = this.#size(data);
         if (dataSize > this.limit) {
             console.warn(`[JunDB] ${key} >  ${this
@@ -72,11 +72,12 @@ export class JunRAM {
     }
 
     stats() {
+        const kb = this.currentSize / 1024;
+        const mb = this.currentSize / (1024 * 1024);
+
         return {
-            used: (this.currentSize / 1024
-                / 1024).toFixed(2) + " MB",
-            limit: (this.limit / 1024
-                / 1024).toFixed(2) + " MB",
+            used: mb < 0.01 ? `${kb.toFixed(2)} KB` : `${mb.toFixed(2)} MB`,
+            limit: (this.limit / (1024 * 1024)).toFixed(2) + " MB",
             items: this.cache.size
         };
     }
