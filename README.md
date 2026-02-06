@@ -1,16 +1,24 @@
 # Jun-DB
 
-**Jun-DB** is a sharded, hierarchical object persistence engine for Node.js. It operates by intercepting read and write operations via **native Proxies**, behaving as a persistent object graph where the in-memory structure is isomorphically reflected in the file system.
+Jun-DB is a hierarchical persistent object store for Node.js that uses native JavaScript Proxies to provide transparent filesystem-backed object manipulation. It employs recursive sharding with V8 binary serialization and atomic I/O operations.
 
-Unlike traditional embedded databases, Jun-DB employs a **recursive sharding strategy** combined with V8 binary serialization. This allows for the manipulation of large datasets with a minimal initial memory footprint, while ensuring transactional integrity through atomic write operations.
+## Architecture
 
-## Key Features
+The database operates on these technical principles:
 
-* **Transparent Persistence:** Works just like a standard JavaScript object. No complex query languages; just `object.property = value`.
-* **Recursive Sharding (JunShard):** Automatically fragments deeply nested objects into separate binary files. You can store gigabytes of data while only keeping the actively accessed fragments in RAM.
-* **Real LRU Caching:** Memory management is based on the actual byte size of serialized objects, not key counts, ensuring strict adherence to memory limits.
-* **Atomic I/O:** Writes utilize a generic "write-sync-rename" strategy to prevent data corruption during power failures or process crashes.
-* **Flow Control System:** Intercept and customize operations with middleware-like interceptors and attach custom methods to any node.
+1. **V8 Binary Serialization** - Data is stored using Node.js's native `v8.serialize()` and `v8.deserialize()` methods, supporting JavaScript types (Date, RegExp, Map, Set, TypedArrays) that JSON cannot represent.
+
+2. **Recursive Sharding** - Objects are automatically fragmented into separate files when nested:
+   - **Maps (`.map.bin`)** store references to child nodes
+   - **Nodes (`.node.bin`)** store primitive values
+   - **Flows (`.flow.bin`)** store serialized functions and interceptors
+
+3. **Atomic I/O** - Write operations use a temporary file and atomic rename strategy to prevent data corruption.
+
+4. **LRU Caching** - A custom LRU implementation (`JunRAM`) manages memory across three categories:
+   - Nodes: 88% of allocated memory
+   - Maps: 10% of allocated memory
+   - Flows: 2% of allocated memory
 
 ## Installation
 
@@ -20,389 +28,252 @@ npm install jun-db
 
 ## Initialization
 
-Configuration allows you to tune memory consumption and write latency to suit your environment's resources.
-
 ```javascript
 import { JunDB } from 'jun-db';
 
 const db = new JunDB({
-    folder: './data',   // Root directory for persistence
-    memory: 50,         // Strict RAM limit (MB) for the LRU cache
-    atomic: true,       // Enables atomic writing (prevents corruption)
-    depth: 2,           // Directory depth for ID generation (sharding distribution)
+    folder: './data',     // Root storage directory
+    depth: 2,             // Directory depth for shard organization
+    memory: 50,           // RAM limit in megabytes
+    atomic: true,         // Enable atomic write operations
     maps: {
-        threshold: 10,  // Operations buffer before saving the index (map)
-        debounce: 5000  // Debounce time (ms) for index saves
+        threshold: 10,    // Operations before forced map save
+        debounce: 5000    // Debounce timer in milliseconds for maps
     },
     nodes: {
-        threshold: 5,   // Operations buffer before saving data (node)
-        debounce: 3000  // Debounce time (ms) for data saves
+        threshold: 5,     // Operations before forced node save
+        debounce: 3000    // Debounce timer in milliseconds for nodes
     }
 });
 ```
 
-## Basic Usage
+## Basic Operations
 
-Interaction is handled entirely through standard JavaScript operations on the `db.data` property.
+The `db.data` property returns a Proxy that transparently handles persistence:
 
 ```javascript
-// Writing: Persistence is automatic (handled by triggers and debouncing)
-db.data.users = {
+// Primitives are stored in .node.bin files
+db.data.version = 1;
+db.data.timestamp = new Date();
+
+// Nested objects trigger automatic sharding
+db.data.users = {};
+db.data.users.admin = {
     id: 1,
-    name: "Alice",
-    session: { active: true }
+    role: 'admin',
+    permissions: new Set(['read', 'write']),
+    settings: {
+        theme: 'dark',
+        notifications: true
+    }
 };
 
-// Reading: Lazy Loading
-// The system only loads the necessary fragment from disk into RAM
-// when the property is accessed.
-console.log(db.data.users.name);
+// Reading data - only required fragments are loaded
+console.log(db.data.users.admin.role); // 'admin'
 
 // Deletion
-delete db.data.users;
+delete db.data.version;
 ```
 
-### Persistence and Maintenance
-
-While Jun-DB manages I/O asynchronously, it is recommended to ensure the write queue is empty before terminating the application.
+### Persistence Control
 
 ```javascript
-// Force write of all pending data to disk
+// Force all pending writes to disk
 await db.flush();
 
-// Inspect memory usage statistics (Maps, Nodes, and Flows)
+// View memory usage statistics
 console.log(db.memory());
+// {
+//   maps: { used: '1.20 MB', limit: '5.00 MB', items: 15 },
+//   nodes: { used: '12.50 MB', limit: '44.00 MB', items: 200 },
+//   flow: { used: '0.05 MB', limit: '1.00 MB', items: 2 }
+// }
 ```
 
-## Architectural Concepts
+## Flow System
 
-### 1. Recursive Sharding
+The flow system allows attaching serializable functions and interceptors to data nodes. Functions are stored as strings in `.flow.bin` files and rehydrated when accessed.
 
-When an object grows or becomes nested, Jun-DB extracts sub-objects and moves them to independent binary files, replacing the data in the parent node with a lightweight pointer. This prevents the need to load the entire database into memory.
-
-### 2. V8 Serialization & LRU Cache
-
-The system uses Node's native V8 serialization for high-performance binary storage. The internal LRU (Least Recently Used) cache evicts the least accessed fragments when the byte-size limit (configured via `memory`) is reached.
-
-### 3. Atomic Integrity
-
-Files are never modified directly. Updates are written to a `.tmp` file, synced to disk, and then renamed. This guarantees that the database state remains valid even if the process crashes mid-write.
-
-## Considerations and Limitations
-
-### Performance and Scalability
-- **I/O as a bottleneck:** Each access to deeply nested data can involve multiple disk reads. Recommended for data that is accessed in a localized manner.
-- **Many small files:** Sharding generates numerous files. Filesystems like ext4 or NTFS handle this well, but it can affect backup or synchronization operations.
-- **V8 Serialization:** Only serializes what V8 can serialize. Does not support custom functions, promises, sockets, etc. (except via `.toString()` in the flow system).
-
-### Memory Usage
-- **Strict LRU cache:** When the memory limit is reached, entire shards are unloaded, not parts of them. Adjust `memory` according to your access patterns.
-- **Sharding overhead:** Each shard adds metadata. For small, flat data, a traditional database may be more efficient.
-
-### Technical Limitations
-- **Node.js exclusive environment:** Not portable to browsers or other runtimes.
-- **No multi-operation transactions:** No automatic rollback for complex operations.
-- **No indexes or advanced queries:** You must implement your own indexes if you need complex searches.
-- **Basic concurrency:** Multiple processes can read, but only one process should write at a time.
-
-### Recommended Use Cases
-- **Hierarchical configurations:** Ideal for configuration-like data with moderate depth.
-- **Session or cache data:** Where accesses are localized and data has limited lifespan.
-- **Rapid prototyping:** When you need persistence without defining schemas.
-- **Desktop/CLI applications:** Where local I/O is fast and controlled.
-
-### Not Recommended Use Cases
-- **Highly relational data:** Use SQL databases.
-- **High-frequency writes:** Such as high-speed logging.
-- **Complex searches:** No built-in indexes.
-- **Simultaneous multi-process environments:** No sophisticated locking.
-
-## Flow Control System
-
-Jun-DB provides a powerful flow control system that allows you to intercept and customize operations at any node. This system is accessible through special properties on each proxy.
-
-### Interceptors (Proxy Middleware)
-
-Use interceptors to validate data, transform values, or protect properties before persistence occurs.
+### Node Methods
 
 ```javascript
-// Define interceptors for the current node
-db.data.$setProxy({
-    // Intercept write operations
-    set(target, key, value, receiver) {
-        // 'this' context provides: resolve, reject, data, map, open, Jun
-        
-        if (key === 'price' && value < 0) {
-            this.reject(new Error("Price cannot be negative"));
-            return;
-        }
-        
-        if (key === 'email' && !value.includes('@')) {
-            this.reject(new Error("Invalid email"));
-            return;
-        }
+// Initialize node structure
+db.data.inventory = {};
 
-        // Allow the operation
-        this.resolve(value);
+// Attach methods to the inventory node
+db.data.inventory.$setCall({
+    addItem: function(itemId, count) {
+        if (!this.data[itemId]) {
+            this.data[itemId] = 0;
+        }
+        this.data[itemId] += count;
+        return this.data[itemId];
     },
     
-    // Intercept read operations
-    get(target, key, receiver) {
-        if (key === 'password') {
-            this.reject(new Error("Access denied"));
-            return;
+    clear: function() {
+        const keys = Object.keys(this.data);
+        for (let key of keys) {
+            delete this.data[key];
         }
-        
-        // Continue with normal operation
-        this.resolve();
-    },
-    
-    // Intercept delete operations
-    delete(target, key) {
-        if (key === 'id') {
-            this.reject(new Error("Cannot delete ID"));
-            return;
-        }
-        
-        this.resolve();
+        return true;
     }
 });
 
-// Usage example:
-try {
-    db.data.user = {
-        name: "Alice",
-        email: "alice@email.com",
-        password: "123456"
-    };
-    
-    console.log(db.data.user.name);  // OK
-    console.log(db.data.user.password);  // Throws Error
-    
-    db.data.user.email = "invalid-email";  // Throws Error
-    delete db.data.user.id;  // Throws Error if 'id' exists
-} catch (e) {
-    console.error(e.message);
-}
-
-// Remove specific interceptors
-db.data.$delProxy('set');  // Remove only the 'set' interceptor
-db.data.$delProxy();       // Remove all interceptors
+// Execute stored method
+db.data.inventory.addItem('widget', 100);
 ```
 
-### Custom Methods (Call)
-
-You can attach business logic functions directly to specific nodes. These functions inherit the database context.
+### Interceptors
 
 ```javascript
-// Attach methods to the current node
-db.data.$setCall({
-    calculateTotal() {
-        // 'this.data' refers to the object where this flow is attached
-        let total = 0;
-        for (const item in this.data) {
-            if (typeof this.data[item] === 'object' && this.data[item].price) {
-                total += this.data[item].price;
-            }
+db.data.settings = { theme: 'light' };
+
+// Apply interceptors to settings node
+db.data.settings.$setProxy({
+    set: function(target, key, value) {
+        if (key === 'theme' && value !== 'dark' && value !== 'light') {
+            throw new Error('Invalid theme');
         }
-        return total;
+        target[key] = value;
+        return true;
     },
-    
-    addProduct(name, price) {
-        if (!this.data.products) {
-            this.data.products = {};
+
+    get: function(target, key) {
+        if (key === 'timestamp') {
+            return Date.now();
         }
-        this.data.products[name] = { price, date: new Date() };
-        return `Product ${name} added`;
+        return target[key];
     },
-    
-    findByPrice(max) {
-        const results = {};
-        for (const [name, product] of Object.entries(this.data.products || {})) {
-            if (product.price <= max) {
-                results[name] = product;
-            }
+
+    delete: function(target, key) {
+        if (key === 'theme') {
+            return false;
         }
-        return results;
+        delete target[key];
+        return true;
     }
 });
-
-// Usage:
-db.data.cart = {
-    apples: { price: 1.5, quantity: 2 },
-    oranges: { price: 2.0, quantity: 3 }
-};
-
-const total = db.data.cart.calculateTotal();
-console.log(`Total: $${total}`);
-
-db.data.cart.addProduct("pears", 2.5);
-const affordable = db.data.cart.findByPrice(2.0);
-
-// Remove specific methods
-db.data.$delCall('calculateTotal');  // Remove only this method
-db.data.$delCall();                  // Remove all methods
 ```
 
-### Shared Methods (Global)
-
-For logic that must be globally available across any node in the database, use `db.shared`.
+### Removing Flows
 
 ```javascript
-// Register global methods
-db.shared.timestamp = function() {
-    // Injects a timestamp into the current node
-    this.data._lastModified = new Date().toISOString();
-    return this.data._lastModified;
-};
-
-db.shared.validateEmail = function(email) {
-    const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return regex.test(email);
-};
-
-db.shared.encrypt = function(text) {
-    // Simple encryption example
-    return btoa(text);
-};
-
-// Usage on any node:
-db.data.user = { name: "John" };
-const timestamp = db.data.user.timestamp();
-console.log(`Modified: ${timestamp}`);
-
-const isValid = db.data.user.validateEmail("john@email.com");
-console.log(`Valid email: ${isValid}`);
-
-// Shared methods are available at all levels
-db.data.config.timestamp();
-db.data.products.category.timestamp();
+db.data.inventory.$delCall('addItem');
+db.data.settings.$delProxy('set');
 ```
 
-### Navigation Between Nodes
+## Navigation
 
-Flow methods have access to `this.open()` for navigating to other nodes:
+Access nested maps directly using the `open()` method:
 
 ```javascript
-db.data.$setCall({
-    async getCompleteProfile() {
-        // Navigate to another node from current context
-        const users = this.open('users');
-        const config = this.open('config', 'preferences');
-        
-        return {
-            profile: this.data,
-            allUsers: users,
-            preferences: config
-        };
-    },
-    
-    moveData(destinationPath) {
-        // Move data to another node
-        const destination = this.open(...destinationPath.split('.'));
-        Object.assign(destination, this.data);
-        this.data = {};  // Clear origin
-        return "Data moved successfully";
-    }
-});
-
-// Usage:
-const completeProfile = await db.data.user.john.getCompleteProfile();
-db.data.temp.moveData('archived.2024');
+// Navigate to deeply nested structure
+const nestedMap = db.open('users', 'admin', 'settings');
+nestedMap.theme = 'dark';
 ```
 
-### Complete Example: Shopping Cart System
+## Memory Management
+
+The LRU cache evicts least recently used fragments when memory limits are reached:
 
 ```javascript
-// Setup flow for cart
-db.data.cart.$setProxy({
-    set(target, key, value, receiver) {
-        if (key === 'quantity' && (value < 1 || value > 100)) {
-            this.reject(new Error("Quantity must be between 1 and 100"));
-            return;
-        }
-        
-        if (key === 'price' && value <= 0) {
-            this.reject(new Error("Price must be positive"));
-            return;
-        }
-        
-        this.resolve(value);
-    }
-});
+// Memory is divided between components:
+// - Nodes: 88% for primitive data
+// - Maps: 10% for directory structures
+// - Flows: 2% for serialized functions
+```
 
-db.data.cart.$setCall({
-    add(product, price, quantity = 1) {
-        if (!this.data.items) this.data.items = {};
-        
-        this.data.items[product] = {
-            price,
-            quantity,
-            added: new Date()
-        };
-        
-        return `✅ ${quantity}x ${product} added`;
-    },
-    
-    remove(product) {
-        if (this.data.items && this.data.items[product]) {
-            delete this.data.items[product];
-            return `❌ ${product} removed`;
-        }
-        return "Product not found";
-    },
-    
-    total() {
-        let total = 0;
-        for (const item of Object.values(this.data.items || {})) {
-            total += item.price * item.quantity;
-        }
-        return total.toFixed(2);
-    },
-    
-    applyDiscount(percentage) {
-        if (percentage < 0 || percentage > 100) {
-            throw new Error("Invalid percentage");
-        }
-        
-        for (const [name, item] of Object.entries(this.data.items || {})) {
-            item.originalPrice = item.price;
-            item.price = item.price * (1 - percentage / 100);
-        }
-        
-        return `${percentage}% discount applied`;
-    }
-});
+## Maintenance
 
-// Using the cart
-db.data.cart.add("Laptop", 999.99, 1);
-db.data.cart.add("Mouse", 25.50, 2);
-db.data.cart.add("Keyboard", 75.00, 1);
-
-console.log(`Total: $${db.data.cart.total()}`);
-db.data.cart.applyDiscount(10);
-console.log(`Total with discount: $${db.data.cart.total()}`);
-
-// Try to violate rules (will be rejected)
-try {
-    db.data.cart.items.Laptop.quantity = 200;  // Throws Error
-} catch (e) {
-    console.error(e.message);
-}
+```javascript
+// Remove empty directories
+await db.JunDrive.prune();
 ```
 
 ## API Reference
 
-* **`db.data`**: The root proxy object. All operations on this object are automatically persisted.
-* **`db.open(...path)`**: Manually navigates to and returns a Proxy for a specific sub-node. This is useful for optimizing access in very deep structures without traversing the root.
-* **`db.flush()`**: Returns a `Promise`. Resolves when all asynchronous I/O write buffers are empty and data is safely on disk.
-* **`db.memory()`**: Returns an object containing detailed statistics about the memory consumption of internal subsystems (Maps, Nodes, Flows).
-* **`db.shared`**: An object used to register global functions accessible from any data proxy.
-* **`$setProxy(object)`**: Attach interceptors to the current node.
-* **`$delProxy(key?)`**: Remove interceptors from the current node.
-* **`$setCall(object)`**: Attach custom methods to the current node.
-* **`$delCall(key?)`**: Remove custom methods from the current node.
+### JunDB Constructor
 
----
+```javascript
+new JunDB({
+    folder: string,           // Base storage directory
+    depth: number,            // Directory nesting depth for shards
+    memory: number,           // Total RAM limit in MB
+    atomic: boolean,          // Enable atomic writes
+    maps: {
+        threshold: number,    // Operations before map save
+        debounce: number      // Debounce delay for map saves (ms)
+    },
+    nodes: {
+        threshold: number,    // Operations before node save
+        debounce: number      // Debounce delay for node saves (ms)
+    }
+})
+```
 
-**License:** MIT
+### Core Methods
+
+- `db.flush()`: Forces all pending writes to disk
+- `db.memory()`: Returns memory usage statistics
+- `db.open(...path)`: Navigates to nested maps
+- `db.JunDrive.prune()`: Removes empty directories
+
+### Node Methods (via Proxy)
+
+- `$setCall(object)`: Attach methods to current node
+- `$delCall(key?)`: Remove methods from current node
+- `$setProxy(object)`: Attach interceptors to current node
+- `$delProxy(key?)`: Remove interceptors from current node
+
+## Technical Considerations
+
+### Performance Characteristics
+
+- **Sharding overhead**: Each nested object creates separate files, which may impact filesystem performance with many small files
+- **Cache efficiency**: Frequently accessed fragments remain in memory, while less-used data is evicted
+- **I/O patterns**: Reads trigger disk access only for uncached fragments
+
+### Limitations
+
+1. **Function serialization**: Only traditional `function` syntax is supported
+2. **Node.js environment**: Requires Node.js 18+ for V8 serialization APIs
+3. **Concurrent access**: Multiple processes can read, but writes should be coordinated
+4. **No built-in queries**: Indexing and complex queries must be implemented externally
+
+### Recommended Use Cases
+
+- Hierarchical configuration storage
+- Session data with localized access patterns
+- Prototyping without schema definition
+- Desktop/CLI applications with controlled I/O
+
+## Implementation Details
+
+### File Structure
+
+```
+data/
+├── maps/          # .map.bin files (directory structures)
+├── nodes/         # .node.bin files (primitive data)
+├── flows/         # .flow.bin files (serialized functions)
+└── root.map.bin   # Root map file
+```
+
+### Serialization Format
+
+Data is serialized using `v8.serialize()` to binary format, supporting:
+- Primitive values (string, number, boolean, null)
+- Native objects (Date, RegExp, Map, Set, ArrayBuffer)
+- TypedArrays (Uint8Array, Float64Array, etc.)
+- Nested object structures
+
+### Cache Eviction
+
+When memory limits are exceeded:
+1. Least recently accessed fragments are identified
+2. Their binary representations are removed from RAM
+3. Fragments remain on disk and can be reloaded when accessed
+
+## License
+
+MIT
