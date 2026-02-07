@@ -139,11 +139,14 @@ export class JunDB {
                 if (typeof key === 'symbol')
                     return Reflect.get(target, key);
 
-                if (key === '$setProxy') return (o) => root.JunFlow.set('proxy', o)
-                if (key === '$delProxy') return (key) => root.JunFlow.delete('proxy', key)
-
-                if (key === '$setCall') return (o) => root.JunFlow.set('call', o)
-                if (key === '$delCall') return (key) => root.JunFlow.delete('call', key)
+                if (key === '$call') return {
+                    define: (o) => { root.JunFlow.set('call', o) },
+                    remove: (key) => { root.JunFlow.delete('call', key) }
+                }
+                if (key === '$proxy') return {
+                    define: (o) => { root.JunFlow.set('proxy', o) },
+                    remove: (key) => { root.JunFlow.delete('proxy', key) }
+                }
 
                 const flow = root.JunFlow.isFlow
                     ? (root.JunFlow.get('call')) : null;
