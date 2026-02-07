@@ -1,24 +1,10 @@
+
+
 # Jun-DB
 
-Jun-DB is a hierarchical persistent object store for Node.js that uses native JavaScript Proxies to provide transparent filesystem-backed object manipulation. It employs recursive sharding with V8 binary serialization and atomic I/O operations.
+Jun-DB is a hierarchical, sharded object persistence engine for Node.js. It intercepts read and write operations through native Proxies, behaving as a persistent object graph where the in-memory structure maps isomorphically to the filesystem.
 
-## Architecture
-
-The database operates on these technical principles:
-
-1. **V8 Binary Serialization** - Data is stored using Node.js's native `v8.serialize()` and `v8.deserialize()` methods, supporting JavaScript types (Date, RegExp, Map, Set, TypedArrays) that JSON cannot represent.
-
-2. **Recursive Sharding** - Objects are automatically fragmented into separate files when nested:
-   - **Maps (`.map.bin`)** store references to child nodes
-   - **Nodes (`.node.bin`)** store primitive values
-   - **Flows (`.flow.bin`)** store serialized functions and interceptors
-
-3. **Atomic I/O** - Write operations use a temporary file and atomic rename strategy to prevent data corruption.
-
-4. **LRU Caching** - A custom LRU implementation (`JunRAM`) manages memory across three categories:
-   - Nodes: 88% of allocated memory
-   - Maps: 10% of allocated memory
-   - Flows: 2% of allocated memory
+Unlike traditional embedded databases, Jun-DB uses **recursive sharding** combined with V8 binary serialization. This allows manipulation of large datasets with a minimal initial memory footprint, while ensuring write integrity through atomic file operations.
 
 ## Installation
 
@@ -26,254 +12,350 @@ The database operates on these technical principles:
 npm install jun-db
 ```
 
-## Initialization
+Requirements: Node.js >= 18.0.0 (uses recent filesystem APIs and V8 serialization).
+
+Zero external dependencies.
+
+## Initialization and Configuration
+
+The `JunDB` constructor accepts a plain configuration object. All fields are optional and have defaults.
 
 ```javascript
 import { JunDB } from 'jun-db';
 
 const db = new JunDB({
-    folder: './data',     // Root storage directory
-    depth: 2,             // Directory depth for shard organization
-    memory: 50,           // RAM limit in megabytes
-    atomic: true,         // Enable atomic write operations
+    // Base path for binary file storage.
+    // Default: './data'
+    folder: './data',
+
+    // Memory limit (in MB) for the LRU cache.
+    // The system evicts inactive shards when this limit is reached.
+    // Default: 50
+    memory: 50,
+
+    // Enables atomic writes (write-to-temp then rename).
+    // Recommended true for production, false for max throughput in volatile environments.
+    // Default: true
+    atomic: true,
+
+    // Configuration for structure maps (indexes).
     maps: {
-        threshold: 10,    // Operations before forced map save
-        debounce: 5000    // Debounce timer in milliseconds for maps
+        threshold: 10,  // Write operations before forcing a flush to disk
+        debounce: 5000   // Milliseconds to wait before write-back (debounce timer)
     },
+
+    // Configuration for data nodes (values).
     nodes: {
-        threshold: 5,     // Operations before forced node save
-        debounce: 3000    // Debounce timer in milliseconds for nodes
-    }
+        threshold: 5,
+        debounce: 3000
+    },
+
+    // Sharding depth: length of the directory prefix derived from generated IDs.
+    // Default: 2
+    depth: 2
 });
 ```
 
-## Basic Operations
+### Memory Budget Distribution
 
-The `db.data` property returns a Proxy that transparently handles persistence:
+The configured `memory` value is split internally across three separate LRU caches:
+
+| Cache       | Share | Purpose                                    |
+|-------------|-------|--------------------------------------------|
+| `nodesRam`  | 88%   | Data nodes (actual stored values)          |
+| `mapsRam`   | 10%   | Structure maps (pointers between nodes)    |
+| `flowRam`   |  2%   | Flow definitions (`$proxy` and `$call`)    |
+
+The LRU cache (`JunRAM`) tracks size in serialized bytes, not key count. When the budget for a cache segment is exceeded, the least recently used entries are evicted. Pinned keys (the root files) are never evicted.
+
+## Architecture
+
+### 1. Transparent Persistence via Proxies
+
+Jun-DB wraps the root object and its sub-objects in JavaScript `Proxy` instances. There are no explicit `insert` or `update` methods for standard data manipulation. Native language operations trigger the persistence logic directly.
 
 ```javascript
-// Primitives are stored in .node.bin files
-db.data.version = 1;
-db.data.timestamp = new Date();
-
-// Nested objects trigger automatic sharding
 db.data.users = {};
-db.data.users.admin = {
-    id: 1,
-    role: 'admin',
-    permissions: new Set(['read', 'write']),
-    settings: {
-        theme: 'dark',
-        notifications: true
-    }
-};
+db.data.users.admin = { id: 1, role: 'root' };
 
-// Reading data - only required fragments are loaded
-console.log(db.data.users.admin.role); // 'admin'
+console.log(db.data.users.admin.role); // 'root'
 
-// Deletion
-delete db.data.version;
+delete db.data.users.admin;
 ```
 
-### Persistence Control
+When you assign a plain object to a key, the system recursively decomposes it into shards (see below). When you read a key that points to a shard, the system loads and proxies it transparently.
 
-```javascript
-// Force all pending writes to disk
-await db.flush();
+### 2. Recursive Sharding
 
-// View memory usage statistics
-console.log(db.memory());
-// {
-//   maps: { used: '1.20 MB', limit: '5.00 MB', items: 15 },
-//   nodes: { used: '12.50 MB', limit: '44.00 MB', items: 200 },
-//   flow: { used: '0.05 MB', limit: '1.00 MB', items: 2 }
-// }
-```
+When a plain object is assigned, `JunShard.forge` walks the object recursively. Every nested plain object becomes an independent shard: a pair of binary files (a map and a node) stored under a randomly generated ID with a directory prefix determined by `depth`.
 
-## Flow System
+The parent node stores a lightweight pointer string (`node:<id>.node.bin`) instead of the actual data. The parent map stores the corresponding map file path. On read, the proxy intercepts the access, resolves the pointer, loads only the required shard, and returns a new proxy over it.
 
-The flow system allows attaching serializable functions and interceptors to data nodes. Functions are stored as strings in `.flow.bin` files and rehydrated when accessed.
-
-### Node Methods
-
-```javascript
-// Initialize node structure
-db.data.inventory = {};
-
-// Attach methods to the inventory node
-db.data.inventory.$setCall({
-    addItem: function(itemId, count) {
-        if (!this.data[itemId]) {
-            this.data[itemId] = 0;
-        }
-        this.data[itemId] += count;
-        return this.data[itemId];
-    },
-    
-    clear: function() {
-        const keys = Object.keys(this.data);
-        for (let key of keys) {
-            delete this.data[key];
-        }
-        return true;
-    }
-});
-
-// Execute stored method
-db.data.inventory.addItem('widget', 100);
-```
-
-### Interceptors
-
-```javascript
-db.data.settings = { theme: 'light' };
-
-// Apply interceptors to settings node
-db.data.settings.$setProxy({
-    set: function(target, key, value) {
-        if (key === 'theme' && value !== 'dark' && value !== 'light') {
-            throw new Error('Invalid theme');
-        }
-        target[key] = value;
-        return true;
-    },
-
-    get: function(target, key) {
-        if (key === 'timestamp') {
-            return Date.now();
-        }
-        return target[key];
-    },
-
-    delete: function(target, key) {
-        if (key === 'theme') {
-            return false;
-        }
-        delete target[key];
-        return true;
-    }
-});
-```
-
-### Removing Flows
-
-```javascript
-db.data.inventory.$delCall('addItem');
-db.data.settings.$delProxy('set');
-```
-
-## Navigation
-
-Access nested maps directly using the `open()` method:
-
-```javascript
-// Navigate to deeply nested structure
-const nestedMap = db.open('users', 'admin', 'settings');
-nestedMap.theme = 'dark';
-```
-
-## Memory Management
-
-The LRU cache evicts least recently used fragments when memory limits are reached:
-
-```javascript
-// Memory is divided between components:
-// - Nodes: 88% for primitive data
-// - Maps: 10% for directory structures
-// - Flows: 2% for serialized functions
-```
-
-## Maintenance
-
-```javascript
-// Remove empty directories
-await db.JunDrive.prune();
-```
-
-## API Reference
-
-### JunDB Constructor
-
-```javascript
-new JunDB({
-    folder: string,           // Base storage directory
-    depth: number,            // Directory nesting depth for shards
-    memory: number,           // Total RAM limit in MB
-    atomic: boolean,          // Enable atomic writes
-    maps: {
-        threshold: number,    // Operations before map save
-        debounce: number      // Debounce delay for map saves (ms)
-    },
-    nodes: {
-        threshold: number,    // Operations before node save
-        debounce: number      // Debounce delay for node saves (ms)
-    }
-})
-```
-
-### Core Methods
-
-- `db.flush()`: Forces all pending writes to disk
-- `db.memory()`: Returns memory usage statistics
-- `db.open(...path)`: Navigates to nested maps
-- `db.JunDrive.prune()`: Removes empty directories
-
-### Node Methods (via Proxy)
-
-- `$setCall(object)`: Attach methods to current node
-- `$delCall(key?)`: Remove methods from current node
-- `$setProxy(object)`: Attach interceptors to current node
-- `$delProxy(key?)`: Remove interceptors from current node
-
-## Technical Considerations
-
-### Performance Characteristics
-
-- **Sharding overhead**: Each nested object creates separate files, which may impact filesystem performance with many small files
-- **Cache efficiency**: Frequently accessed fragments remain in memory, while less-used data is evicted
-- **I/O patterns**: Reads trigger disk access only for uncached fragments
-
-### Limitations
-
-1. **Function serialization**: Only traditional `function` syntax is supported
-2. **Node.js environment**: Requires Node.js 18+ for V8 serialization APIs
-3. **Concurrent access**: Multiple processes can read, but writes should be coordinated
-4. **No built-in queries**: Indexing and complex queries must be implemented externally
-
-### Recommended Use Cases
-
-- Hierarchical configuration storage
-- Session data with localized access patterns
-- Prototyping without schema definition
-- Desktop/CLI applications with controlled I/O
-
-## Implementation Details
-
-### File Structure
+**Physical structure for `depth: 2` and a generated ID of `A3F7BC01`:**
 
 ```
 data/
-├── maps/          # .map.bin files (directory structures)
-├── nodes/         # .node.bin files (primitive data)
-├── flows/         # .flow.bin files (serialized functions)
-└── root.map.bin   # Root map file
+├── root.map.bin        # Root structure map
+├── root.node.bin       # Root data node
+├── maps/
+│   └── A3/
+│       └── A3F7BC01.map.bin
+├── nodes/
+│   └── A3/
+│       └── A3F7BC01.node.bin
+└── flows/
+    └── ...             # Flow definitions (if any)
 ```
 
-### Serialization Format
+- `.map.bin` files contain structure: keys mapped to child map file paths, plus a `$file` self-reference.
+- `.node.bin` files contain the terminal data: primitives, arrays, dates, and pointer strings to child shards.
+- `.flow.bin` files store serialized function strings for `$proxy` and `$call` definitions.
 
-Data is serialized using `v8.serialize()` to binary format, supporting:
-- Primitive values (string, number, boolean, null)
-- Native objects (Date, RegExp, Map, Set, ArrayBuffer)
-- TypedArrays (Uint8Array, Float64Array, etc.)
-- Nested object structures
+The `depth` parameter controls directory fan-out. A depth of 2 means the first 2 characters of the hex ID form a subdirectory. This prevents any single directory from accumulating too many files.
 
-### Cache Eviction
+### 3. V8 Serialization
 
-When memory limits are exceeded:
-1. Least recently accessed fragments are identified
-2. Their binary representations are removed from RAM
-3. Fragments remain on disk and can be reloaded when accessed
+All data is serialized and deserialized using Node.js's built-in `v8.serialize` / `v8.deserialize`. This is the same mechanism Node uses internally to pass structured data between worker threads.
 
-## License
+**Supported types:** primitives, plain Objects, Arrays, Date, RegExp, Map, Set, Buffer, TypedArrays, and other types supported by the [structured clone algorithm](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Structured_clone_algorithm).
 
-MIT
+**Not supported:** functions (except through the Flow system as stringified source), Promises, WeakMap, WeakSet, Symbols, and any host objects (Sockets, Streams, etc.).
+
+### 4. Write Strategy (JunDoc)
+
+Each map and node file is managed by a `JunDoc` instance that implements a dual-trigger write-back strategy:
+
+1. **Counter threshold:** after N mutations (configurable via `threshold`), the data is flushed to disk immediately.
+2. **Debounce timer:** if the threshold is not reached, a timer (configurable via `debounce`) schedules a deferred flush. Each new mutation resets the timer.
+
+This batches rapid successive writes into a single I/O operation while still guaranteeing that data reaches disk within a bounded time window.
+
+### 5. Atomic Writes (JunIO)
+
+When `atomic: true` (the default), every write follows this sequence:
+
+1. Serialize the data with `v8.serialize`.
+2. Write the buffer to a temporary file (`<path>.tmp`).
+3. Rename the temporary file to the final path.
+
+On most filesystems, `rename` is atomic within the same volume. This means a crash during step 2 leaves the original file intact, and a crash during step 3 either completes or doesn't — there's no partial write.
+
+The async I/O layer (`AsyncIO`) also provides:
+
+- **Per-file operation queuing:** concurrent writes to the same file are serialized through a per-key promise chain, preventing race conditions.
+- **Global concurrency limit:** at most 64 concurrent I/O operations, with backpressure for anything beyond that.
+- **Retry logic:** transient errors (`ENOENT`, `EMFILE`) are retried up to 3 times with a short delay.
+
+### 6. Object Identity via `open()`
+
+The `db.data` proxy gives you transparent traversal, but each nested access creates a new proxy. If you need to work with a specific subtree repeatedly, `open()` returns a proxy bound to a specific map node:
+
+```javascript
+const users = db.open('users');
+
+// Equivalent to db.data.users.admin, but 'users' is resolved once.
+users.admin = { id: 1, role: 'root' };
+console.log(users.admin.role);
+```
+
+`open()` accepts a variable number of string arguments representing a path through the map hierarchy:
+
+```javascript
+const adminSettings = db.open('users', 'admin', 'settings');
+```
+
+It returns `false` if any segment of the path does not exist.
+
+## Flow Control System
+
+Jun-DB exposes two special properties on every proxied node: `$proxy` and `$call`. These allow injecting custom logic (interceptors and methods) into the data graph. Flow definitions are persisted to `.flow.bin` files; functions are stored as source strings and reconstructed via `eval` on load.
+
+### Interceptors (`$proxy`)
+
+Intercept `get`, `set`, and `delete` operations on a specific node. Useful for validation, transformation, or side effects.
+
+```javascript
+db.data.users.$proxy.define({
+    set(target, key, value, receiver) {
+        // 'this' provides:
+        //   this.data     - the receiver proxy
+        //   this.map      - the JunMap instance for this node
+        //   this.resolve  - call to stop propagation and set a return value
+        //   this.reject   - call to stop propagation and throw an error
+        //   this.open     - function to open sub-paths
+
+        if (key === 'age' && typeof value !== 'number') {
+            this.reject(new Error('age must be a number'));
+            return;
+        }
+
+        if (key === 'email') {
+            this.resolve(value.toLowerCase());
+            return;
+        }
+
+        // If neither resolve nor reject is called, the operation
+        // proceeds normally with the original value.
+    },
+
+    get(target, key, receiver) {
+        // Can intercept reads too.
+        // Call this.resolve(val) to return a custom value.
+        // Call this.reject(err) to throw.
+        // Do nothing to let the default behavior run.
+    },
+
+    delete(target, key) {
+        // Same pattern.
+    }
+});
+
+// Remove a specific interceptor:
+db.data.users.$proxy.remove('set');
+```
+
+### Custom Methods (`$call`)
+
+Attach callable functions to a data node. These are accessible as regular properties on the proxy.
+
+```javascript
+db.data.users.$call.define({
+    findByRole(role) {
+        // 'this' provides:
+        //   this.data  - the proxy for the current node
+        //   this.index - the JunMap instance
+        //   this.flow  - the full call flow object
+        //   this.open  - function to open sub-paths
+        //   this.Jun   - the JunDB instance
+
+        const results = [];
+        for (const key of Object.keys(this.data)) {
+            const user = this.data[key];
+            if (user && user.role === role) {
+                results.push(user);
+            }
+        }
+        return results;
+    }
+});
+
+// Usage:
+const admins = db.data.users.findByRole('root');
+
+// Remove a specific method:
+db.data.users.$call.remove('findByRole');
+```
+
+### Shared Methods
+
+The `db.shared` object allows defining methods that are available on every proxied node, without storing anything per-node:
+
+```javascript
+db.shared.toJSON = function () {
+    const out = {};
+    for (const key of Object.keys(this.data)) {
+        out[key] = this.data[key];
+    }
+    return out;
+};
+
+// Now available on any node:
+const snapshot = db.data.users.toJSON();
+```
+
+Shared methods receive the same `this` context as `$call` methods.
+
+## Lifecycle and Shutdown
+
+Jun-DB uses debounced and threshold-triggered writes. When shutting down, pending timers may not have fired yet. Always call `flush()` before exiting:
+
+```javascript
+process.on('SIGINT', async () => {
+    await db.flush();
+    process.exit(0);
+});
+```
+
+`flush()` waits for all queued async I/O operations to complete. It resolves once every pending write has been committed to disk.
+
+### Pruning Empty Directories
+
+After extensive deletions, the shard directory tree may contain empty folders. Call `prune()` to clean them up:
+
+```javascript
+await db.JunDrive.prune();
+```
+
+This walks the `maps/`, `nodes/`, and `flows/` directories and removes any empty subdirectories.
+
+## Memory Inspection
+
+```javascript
+const stats = db.memory();
+
+// Returns:
+// {
+//   maps:  { used: '0.12 MB', limit: '5.00 MB', items: 14 },
+//   nodes: { used: '3.40 MB', limit: '44.00 MB', items: 230 },
+//   flow:  { used: '0.00 KB', limit: '1.00 MB', items: 0 }
+// }
+```
+
+## Internal Module Reference
+
+| Module     | Role |
+|------------|------|
+| `JunDB`    | Entry point. Creates the root map, sets up `JunDrive`, builds the root proxy. |
+| `JunDrive` | Storage layer. Routes filenames to the correct subdirectory and LRU cache segment. Exposes sync and async read/write/remove/exists. |
+| `JunIO`    | `SyncIO` and `AsyncIO` classes. Handle actual filesystem operations, atomic write logic, concurrency limiting, and retry. |
+| `JunRAM`   | LRU cache sized by serialized byte count. Supports pinned keys that are never evicted. |
+| `JunShard` | Recursive decomposition (`forge`) and recursive deletion (`purge`) of object trees into independent file pairs. |
+| `JunMap`   | Represents a structure map file. Holds key-to-child-map-path mappings. |
+| `JunNode`  | Represents a data node file. Holds terminal values and shard pointer strings. |
+| `JunHub`   | Coordinates a map and its node. Routes `get`, `set`, `delete` through shard logic. |
+| `JunDoc`   | Write-back controller for a single file. Implements threshold + debounce flushing. |
+| `JunFlow`  | Manages `$proxy` and `$call` definitions. Stores functions as strings, reconstructs them on read. |
+
+## Limitations and Caveats
+
+### Single-Writer Process
+
+Jun-DB is designed for a single writing process. Multiple processes can read from the same data directory, but there is no inter-process locking mechanism. Concurrent writes from separate processes will corrupt data.
+
+### I/O Bound on Deep Access
+
+Accessing a deeply nested path that is not cached requires loading each intermediate shard from disk sequentially. If your access patterns are uniformly deep and cache-cold, latency will be dominated by filesystem reads.
+
+### Many Small Files
+
+Recursive sharding produces a large number of small binary files. Modern filesystems (ext4, APFS, NTFS) handle this without issue for typical workloads. It may affect backup tools or synchronization systems that enumerate files.
+
+### Function Storage via `eval`
+
+Flow functions (`$proxy`, `$call`) are stored as stringified source and reconstructed with `eval`. This has the usual security implications: do not store or load flow definitions from untrusted sources.
+
+### No Query Engine
+
+There are no indexes, query planners, or aggregation pipelines. Searching requires walking the object graph through proxied access. For complex queries over large datasets, this is not the right tool.
+
+### Overhead for Small Data
+
+Each shard adds metadata (a map file, a node file, cache entries). If your total dataset is small (under a few MB), a single JSON file or SQLite would be simpler and more efficient.
+
+## When to Use It
+
+- Persistent state for bots, CLI tools, or desktop apps where local I/O is fast and controlled.
+- Hierarchical configuration systems with deep nesting and inheritance.
+- Rapid prototyping where you need persistence without schema definitions.
+- Local caching layers with bounded memory and automatic eviction.
+
+## When Not to Use It
+
+- Data with complex relational structure that demands joins.
+- High-frequency write workloads (logging, telemetry, event streams).
+- Anything requiring full-text search or indexed queries.
+- Multi-process or distributed write scenarios.
+
+---
+
+**License:** MIT
