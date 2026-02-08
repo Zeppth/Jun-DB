@@ -1,5 +1,3 @@
-
-
 # Jun-DB
 
 Jun-DB is a hierarchical, sharded object persistence engine for Node.js. It intercepts read and write operations through native Proxies, behaving as a persistent object graph where the in-memory structure maps isomorphically to the filesystem.
@@ -168,7 +166,7 @@ It returns `false` if any segment of the path does not exist.
 
 ## Flow Control System
 
-Jun-DB exposes two special properties on every proxied node: `$proxy` and `$call`. These allow injecting custom logic (interceptors and methods) into the data graph. Flow definitions are persisted to `.flow.bin` files; functions are stored as source strings and reconstructed via `eval` on load.
+Jun-DB exposes two special properties on every proxied node: `$proxy` and `$call`. These allow injecting custom logic (interceptors and methods) into the data graph. Flow definitions are persisted to `.flow.bin` files; functions are stored as source strings and reconstructed via the `Function` constructor upon loading.
 
 ### Interceptors (`$proxy`)
 
