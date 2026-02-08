@@ -1,6 +1,6 @@
 ================================================
 ESTRUCTURA DEL PROYECTO Y CÓDIGO FUENTE
-Generado el: 6/2/2026, 18:19:46
+Generado el: 8/2/2026, 13:58:55
 ================================================
 
 MAPA DE DIRECTORIOS:
@@ -106,98 +106,142 @@ import { JunShard } from '../JunShard.js';
 import { JunDoc } from './JunDoc.js';
 
 export class JunFlow {
-    #options = null
     constructor(JunDrive, JunMap, options = {}) {
         this.afile = null;
         this.efile = null;
         this.JunDrive = JunDrive;
-        this.#options = options;
         this.JunMap = JunMap;
 
+        this.args = [JunDrive, JunMap.fileFlow, {
+            limit: options?.file?.limit || 2,
+            delay: options.file?.delay || 3000
+        }]
+
         if (JunDrive.existsSync(JunMap.fileFlow)) {
-            this.afile = new JunDoc(
-                JunDrive, JunMap.fileFlow, {
-                limit: options?.file?.limit || 2,
-                delay: options.file?.delay || 3000
-            })
+            this.afile = new JunDoc(...this.args)
+        }
+
+        this.codec = {
+            serialize: (fun) => {
+                return fun.toString()
+            },
+            deserialize: (string) => {
+                const cleanSource = `return ${string}\n//# sourceURL=JunDB_UserLogic.js`;
+                return new Function(cleanSource)();
+
+            }
         }
     }
 
-    save() {
-        return this.file.save();
-    }
-
-    get isFlow() {
-        return this.afile ? true
-            : this.efile ? true
-                : false;
-    }
+    get data() { return this.file.data }
+    get isFlow() { return !!(this.afile ?? this.efile) }
 
     get file() {
         if (this.efile) return this.efile;
         if (this.afile) return this.afile;
-
-        this.efile = new JunDoc(
-            this.JunDrive, this.JunMap.fileFlow, {
-            limit: this.#options?.file?.limit || 2,
-            delay: this.#options?.file?.delay || 3000
-        })
-
+        this.efile = new JunDoc(...this.args)
         return this.efile;
     }
 
-    get data() {
-        return this.file.data
-    }
+    get call() {
+        return {
+            get: (key) => {
+                if (!this.isFlow) return;
 
-    get(key, key2) {
-        if (!this.data[key]) return;
+                const call = (this
+                    .data.call ||= {})
+                const _call = call[key];
+                if (_call === undefined) return;
+                try { return this.codec.deserialize(_call) }
+                catch (e) { console.error('JunFlow.call.get', e) }
+            },
+            define: (a0, a1) => {
+                const call = (this.data.call ||= {})
 
-        const a0 = (o) => {
-            if (typeof o !== 'string') return o;
-            try { return eval(`(${o})`); } catch (e) {
-                try { return eval(`(function ${o})`) }
-                catch (e2) { return o }
+                if (JunShard.isObject(a0)) for (const key in a0) {
+                    if (typeof a0[key] !== 'function') continue;
+                    try { call[key] = this.codec.serialize(a0[key]) }
+                    catch (e) { console.error('JunFlow.call.define', e) }
+                    this.file.save();
+
+                } else if (a0 && (typeof a1 === 'function')) {
+                    call[a0] = this.codec.serialize(a1)
+                    this.file.save();
+                } else return false;
+            },
+            remove: (key) => {
+                const call = (this
+                    .data.call ||= {})
+
+                if (!key === undefined) {
+                    delete this.data.call;
+                } else if (call[key]) {
+                    delete call[key]
+                }
+
+                if (Object.keys(call).length === 0) {
+                    delete this.data.call;
+                    if (Object.keys(this.data).length === 0) {
+                        this.JunDrive.remove(this
+                            .JunMap.fileFlow);
+                    }
+                }
+
+                this.file.save();
+                return true;
             }
-        };
+        }
+    }
 
-        if (this.data[key] && !key2) {
-            const v = {};
-            for (const k in this.data[key]) {
-                v[k] = a0(this.data[key][k]);
+    get proxy() {
+        return {
+            get: (key) => {
+                if (!this.isFlow) return;
+
+                const proxy = (this
+                    .data.proxy ||= {})
+                const _proxy = proxy[key];
+                if (_proxy === undefined) return;
+                try { return this.codec.deserialize(_proxy); }
+                catch (e) { console.error('JunFlow.proxy.get', e) }
+            },
+            define: (a0, a1) => {
+                const proxy = (this.data.proxy ||= {})
+
+                if (JunShard.isObject(a0)) for (const key in a0) {
+                    if (typeof a0[key] !== 'function') continue;
+                    try { proxy[key] = this.codec.serialize(a0[key]) }
+                    catch (e) { console.error('JunFlow.proxy.define', e) }
+                    this.file.save();
+
+                } else if (a0 && (typeof a1 === 'function')) {
+                    proxy[a0] = this.codec.serialize(a1)
+                    this.file.save();
+                } else return false;
+            },
+            remove: (key) => {
+                const proxy = (this
+                    .data.proxy ||= {})
+
+                if (!key === undefined) {
+                    delete this.data.proxy;
+                } else if (proxy[key]) {
+                    delete proxy[key]
+                }
+
+                if (Object.keys(proxy).length === 0) {
+                    delete this.data.proxy
+
+                    if (Object.keys(this.data).length === 0) {
+                        this.JunDrive.remove(this
+                            .JunMap.fileFlow);
+                    }
+                }
+
+                this.file.save();
+                return true;
             }
-            return v;
-        } else if (this.data[key]?.[key2]) {
-            return a0(this.data[key][key2]);
         }
-    }
-
-    set(key, value) {
-        if (!JunShard.isObject(value)) return false;
-        const target = (this.data[key] ||= {});
-        for (const key in value) {
-            if (typeof value[key] === 'function')
-                target[key] = value[key].toString();
-            else continue;
-        }
-        this.file.save()
-        return true;
-    }
-
-    delete(key1, key2) {
-        if (!this.data[key1]) return;
-        if (this.data[key1] && !key2)
-            delete this.data[key1];
-        else if (this.data[key1]?.[key2]) {
-            delete this.data[key1][key2];
-            const keys = Object.keys(
-                this.data[key1]);
-            if (keys.length === 0)
-                delete this.data[key1];
-        }
-
-        this.file.save();
-        return true;
     }
 }
 
@@ -387,7 +431,8 @@ export class JunDB {
         this.JunDrive = new JunDrive({
             memory: options.memory || 50,
             folder: options.folder || './data',
-            atomic: options.atomic
+            atomic: options.atomic === undefined
+                ? true : options.atomic
         });
 
         this.map = new JunMap(
@@ -472,17 +517,16 @@ export class JunDB {
         }
 
         const guard = (method) => (...args) => {
-            if (!root.JunFlow.isFlow) return;
-            const flow = root.JunFlow.get('proxy');
+            const flow = root.JunFlow.proxy.get(method)
 
-            if (flow?.[method]) {
+            if (flow && typeof flow === 'function') {
                 let control = { end: false, value: null, error: null };
                 const receiver = (method === 'delete') ? null
                     : args[args.length - 1];
 
-                flow[method].apply({
-                    resolve: (val) => { control.end = true; control.value = val },
-                    reject: (err) => { control.end = true; control.error = err },
+                flow.apply({
+                    resolve: (value) => { control.end = true; control.value = value },
+                    reject: (error) => { control.end = true; control.error = error },
                     open: (...args) => open(...args),
                     data: receiver, map,
                 }, args);
@@ -496,30 +540,20 @@ export class JunDB {
                 if (typeof key === 'symbol')
                     return Reflect.get(target, key);
 
-                if (key === '$call') return {
-                    define: (o) => { root.JunFlow.set('call', o) },
-                    remove: (key) => { root.JunFlow.delete('call', key) }
-                }
-                if (key === '$proxy') return {
-                    define: (o) => { root.JunFlow.set('proxy', o) },
-                    remove: (key) => { root.JunFlow.delete('proxy', key) }
-                }
+                if (key === '$call') return root.JunFlow.call
+                if (key === '$proxy') return root.JunFlow.proxy
 
-                const flow = root.JunFlow.isFlow
-                    ? (root.JunFlow.get('call')) : null;
+                const flow = root.JunFlow.call.get(key)
 
                 // flow
-                if (flow?.[key]) {
-                    const fun = root.JunFlow.get('call', key);
-
-                    if (typeof fun === 'function') {
-                        return (...args) => fun.apply({
-                            data: receiver, index: map, flow: flow,
-                            open: (...args) => open(...args),
-                            Jun: Jun
-                        }, args);
-                    }
+                if (flow && typeof flow === 'function') {
+                    return (...args) => flow.apply({
+                        data: receiver, index: map, flow: flow,
+                        open: (...args) => open(...args),
+                        Jun: Jun
+                    }, args);
                 }
+
 
                 if (Jun.shared[key]) {
                     const fun = Jun.shared[key];
@@ -541,9 +575,9 @@ export class JunDB {
                 // ////////////////////////////
 
                 const rootGet = root.get(key);
+
                 if (typeof rootGet === 'string'
                     && rootGet.startsWith('node:')) {
-                    const JunMap = Jun.map.constructor;
                     const node = new JunMap(Jun.JunDrive,
                         rootGet.replace('node:', '').replace(
                             '.node.bin', '.map.bin'));
@@ -605,9 +639,8 @@ export class JunDrive {
             throw new Error('Invalid options');
 
         options.folder = options.folder || './data';
-        options.atomic = typeof options.atomic === 'boolean'
-            ? options.atomic : true;
         options.memory = options.memory || 50;
+        options.atomic = options.atomic;
 
         this.syncIO = new SyncIO(options.folder, options.atomic);
         this.asyncIO = new AsyncIO(options.folder, options.atomic);
@@ -1125,7 +1158,7 @@ export class JunShard {
 
 {
   "name": "jun-db",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Minimalist NoSQL sharded database for Node.js. High-performance binary storage that feels like a native JS object via transparent Proxies. Zero dependencies and atomic I/O.",
   "main": "index.js",
   "type": "module",
