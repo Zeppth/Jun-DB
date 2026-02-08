@@ -30,7 +30,8 @@ export class JunDB {
         this.JunDrive = new JunDrive({
             memory: options.memory || 50,
             folder: options.folder || './data',
-            atomic: options.atomic
+            atomic: options.atomic === undefined
+                ? true : options.atomic
         });
 
         this.map = new JunMap(
@@ -115,17 +116,16 @@ export class JunDB {
         }
 
         const guard = (method) => (...args) => {
-            if (!root.JunFlow.isFlow) return;
-            const flow = root.JunFlow.get('proxy');
+            const flow = root.JunFlow.proxy.get(method)
 
-            if (flow?.[method]) {
+            if (flow && typeof flow === 'function') {
                 let control = { end: false, value: null, error: null };
                 const receiver = (method === 'delete') ? null
                     : args[args.length - 1];
 
-                flow[method].apply({
-                    resolve: (val) => { control.end = true; control.value = val },
-                    reject: (err) => { control.end = true; control.error = err },
+                flow.apply({
+                    resolve: (value) => { control.end = true; control.value = value },
+                    reject: (error) => { control.end = true; control.error = error },
                     open: (...args) => open(...args),
                     data: receiver, map,
                 }, args);
@@ -139,30 +139,20 @@ export class JunDB {
                 if (typeof key === 'symbol')
                     return Reflect.get(target, key);
 
-                if (key === '$call') return {
-                    define: (o) => { root.JunFlow.set('call', o) },
-                    remove: (key) => { root.JunFlow.delete('call', key) }
-                }
-                if (key === '$proxy') return {
-                    define: (o) => { root.JunFlow.set('proxy', o) },
-                    remove: (key) => { root.JunFlow.delete('proxy', key) }
-                }
+                if (key === '$call') return root.JunFlow.call
+                if (key === '$proxy') return root.JunFlow.proxy
 
-                const flow = root.JunFlow.isFlow
-                    ? (root.JunFlow.get('call')) : null;
+                const flow = root.JunFlow.call.get(key)
 
                 // flow
-                if (flow?.[key]) {
-                    const fun = root.JunFlow.get('call', key);
-
-                    if (typeof fun === 'function') {
-                        return (...args) => fun.apply({
-                            data: receiver, index: map, flow: flow,
-                            open: (...args) => open(...args),
-                            Jun: Jun
-                        }, args);
-                    }
+                if (flow && typeof flow === 'function') {
+                    return (...args) => flow.apply({
+                        data: receiver, index: map, flow: flow,
+                        open: (...args) => open(...args),
+                        Jun: Jun
+                    }, args);
                 }
+
 
                 if (Jun.shared[key]) {
                     const fun = Jun.shared[key];
@@ -184,9 +174,9 @@ export class JunDB {
                 // ////////////////////////////
 
                 const rootGet = root.get(key);
+
                 if (typeof rootGet === 'string'
                     && rootGet.startsWith('node:')) {
-                    const JunMap = Jun.map.constructor;
                     const node = new JunMap(Jun.JunDrive,
                         rootGet.replace('node:', '').replace(
                             '.node.bin', '.map.bin'));
