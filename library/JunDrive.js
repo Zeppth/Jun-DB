@@ -13,9 +13,8 @@ export class JunDrive {
             throw new Error('Invalid options');
 
         options.folder = options.folder || './data';
-        options.atomic = typeof options.atomic === 'boolean'
-            ? options.atomic : true;
         options.memory = options.memory || 50;
+        options.atomic = options.atomic;
 
         this.syncIO = new SyncIO(options.folder, options.atomic);
         this.asyncIO = new AsyncIO(options.folder, options.atomic);
