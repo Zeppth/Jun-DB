@@ -4,97 +4,141 @@ import { JunShard } from '../JunShard.js';
 import { JunDoc } from './JunDoc.js';
 
 export class JunFlow {
-    #options = null
     constructor(JunDrive, JunMap, options = {}) {
         this.afile = null;
         this.efile = null;
         this.JunDrive = JunDrive;
-        this.#options = options;
         this.JunMap = JunMap;
 
+        this.args = [JunDrive, JunMap.fileFlow, {
+            limit: options?.file?.limit || 2,
+            delay: options.file?.delay || 3000
+        }]
+
         if (JunDrive.existsSync(JunMap.fileFlow)) {
-            this.afile = new JunDoc(
-                JunDrive, JunMap.fileFlow, {
-                limit: options?.file?.limit || 2,
-                delay: options.file?.delay || 3000
-            })
+            this.afile = new JunDoc(...this.args)
+        }
+
+        this.codec = {
+            serialize: (fun) => {
+                return fun.toString()
+            },
+            deserialize: (string) => {
+                const cleanSource = `return ${string}\n//# sourceURL=JunDB_UserLogic.js`;
+                return new Function(cleanSource)();
+
+            }
         }
     }
 
-    save() {
-        return this.file.save();
-    }
-
-    get isFlow() {
-        return this.afile ? true
-            : this.efile ? true
-                : false;
-    }
+    get data() { return this.file.data }
+    get isFlow() { return !!(this.afile ?? this.efile) }
 
     get file() {
         if (this.efile) return this.efile;
         if (this.afile) return this.afile;
-
-        this.efile = new JunDoc(
-            this.JunDrive, this.JunMap.fileFlow, {
-            limit: this.#options?.file?.limit || 2,
-            delay: this.#options?.file?.delay || 3000
-        })
-
+        this.efile = new JunDoc(...this.args)
         return this.efile;
     }
 
-    get data() {
-        return this.file.data
-    }
+    get call() {
+        return {
+            get: (key) => {
+                if (!this.isFlow) return;
 
-    get(key, key2) {
-        if (!this.data[key]) return;
+                const call = (this
+                    .data.call ||= {})
+                const _call = call[key];
+                if (_call === undefined) return;
+                try { return this.codec.deserialize(_call) }
+                catch (e) { console.error('JunFlow.call.get', e) }
+            },
+            define: (a0, a1) => {
+                const call = (this.data.call ||= {})
 
-        const a0 = (o) => {
-            if (typeof o !== 'string') return o;
-            try { return eval(`(${o})`); } catch (e) {
-                try { return eval(`(function ${o})`) }
-                catch (e2) { return o }
+                if (JunShard.isObject(a0)) for (const key in a0) {
+                    if (typeof a0[key] !== 'function') continue;
+                    try { call[key] = this.codec.serialize(a0[key]) }
+                    catch (e) { console.error('JunFlow.call.define', e) }
+                    this.file.save();
+
+                } else if (a0 && (typeof a1 === 'function')) {
+                    call[a0] = this.codec.serialize(a1)
+                    this.file.save();
+                } else return false;
+            },
+            remove: (key) => {
+                const call = (this
+                    .data.call ||= {})
+
+                if (!key === undefined) {
+                    delete this.data.call;
+                } else if (call[key]) {
+                    delete call[key]
+                }
+
+                if (Object.keys(call).length === 0) {
+                    delete this.data.call;
+                    if (Object.keys(this.data).length === 0) {
+                        this.JunDrive.remove(this
+                            .JunMap.fileFlow);
+                    }
+                }
+
+                this.file.save();
+                return true;
             }
-        };
+        }
+    }
 
-        if (this.data[key] && !key2) {
-            const v = {};
-            for (const k in this.data[key]) {
-                v[k] = a0(this.data[key][k]);
+    get proxy() {
+        return {
+            get: (key) => {
+                if (!this.isFlow) return;
+
+                const proxy = (this
+                    .data.proxy ||= {})
+                const _proxy = proxy[key];
+                if (_proxy === undefined) return;
+                try { return this.codec.deserialize(_proxy); }
+                catch (e) { console.error('JunFlow.proxy.get', e) }
+            },
+            define: (a0, a1) => {
+                const proxy = (this.data.proxy ||= {})
+
+                if (JunShard.isObject(a0)) for (const key in a0) {
+                    if (typeof a0[key] !== 'function') continue;
+                    try { proxy[key] = this.codec.serialize(a0[key]) }
+                    catch (e) { console.error('JunFlow.proxy.define', e) }
+                    this.file.save();
+
+                } else if (a0 && (typeof a1 === 'function')) {
+                    proxy[a0] = this.codec.serialize(a1)
+                    this.file.save();
+                } else return false;
+            },
+            remove: (key) => {
+                const proxy = (this
+                    .data.proxy ||= {})
+
+                if (!key === undefined) {
+                    delete this.data.proxy;
+                } else if (proxy[key]) {
+                    delete proxy[key]
+                }
+
+                if (Object.keys(proxy).length === 0) {
+                    delete this.data.proxy
+
+                    if (Object.keys(this.data).length === 0) {
+                        this.JunDrive.remove(this
+                            .JunMap.fileFlow);
+                    }
+                }
+
+                this.file.save();
+                return true;
             }
-            return v;
-        } else if (this.data[key]?.[key2]) {
-            return a0(this.data[key][key2]);
         }
-    }
-
-    set(key, value) {
-        if (!JunShard.isObject(value)) return false;
-        const target = (this.data[key] ||= {});
-        for (const key in value) {
-            if (typeof value[key] === 'function')
-                target[key] = value[key].toString();
-            else continue;
-        }
-        this.file.save()
-        return true;
-    }
-
-    delete(key1, key2) {
-        if (!this.data[key1]) return;
-        if (this.data[key1] && !key2)
-            delete this.data[key1];
-        else if (this.data[key1]?.[key2]) {
-            delete this.data[key1][key2];
-            const keys = Object.keys(
-                this.data[key1]);
-            if (keys.length === 0)
-                delete this.data[key1];
-        }
-
-        this.file.save();
-        return true;
     }
 }
