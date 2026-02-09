@@ -97,8 +97,11 @@ export class JunDB {
     Proxy(map) {
         if (!map?.data) return;
 
-        const Jun = this
         const a0 = map.data;
+        if (this.proxies.has(a0))
+            return this.proxies.get(a0);
+
+        const Jun = this
         const root = new JunHub(this.JunDrive, map, {
             shard: { depth: this.#options?.depth || 2 },
             file: {
