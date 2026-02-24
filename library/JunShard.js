@@ -1,6 +1,29 @@
-// ./library/JunAD.js
+// ./library/JunShard.js
 
 import crypto from 'crypto';
+
+export const JunType = {
+    NODE: 1,
+    FUNCTION: 2,
+    FILE: 3
+}
+
+export const JunCodec = {
+    SIG: 0x4A554E,
+    is(array) {
+        return Array.isArray(array)
+            && array[0] === this.SIG;
+    },
+    encode(type, data) {
+        return [this.SIG, type, Date.now(),
+        Buffer.from(data.toString()).toString('base64')]
+    },
+    decode(array) {
+        if (array?.[0] !== this.SIG) return;
+        return [array[1], array[2], Buffer.from(
+            array[3], 'base64').toString('utf-8')]
+    },
+}
 
 export class JunShard {
     constructor(JunDrive, JunMap, JunHub, depth) {
@@ -10,7 +33,7 @@ export class JunShard {
         this.depth = depth || 2;
     }
 
-   static isObject(any) {
+    static isObject(any) {
         if (!any) return false;
         if (typeof any !== 'object') return false;
         if (Array.isArray(any)) return false;
@@ -21,7 +44,7 @@ export class JunShard {
 
     genId(depth) {
         depth = depth || this.depth;
-        const id = crypto.randomBytes(4)
+        const id = crypto.randomBytes(6)
             .toString('hex').toUpperCase();
         if (!depth || depth <= 0) return `${id}`
         const folder = id.substring(0, depth);
@@ -56,7 +79,8 @@ export class JunShard {
 
                 this.forge(value, _JunMap, _JunHub);
 
-                hubContent[key] = `node:${nodeFile}`;
+                hubContent[key] = JunCodec
+                    .encode(1, nodeFile)
                 mapContent[key] = mapFile;
             } else {
                 hubContent[key] = value;

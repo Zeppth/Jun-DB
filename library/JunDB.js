@@ -1,6 +1,7 @@
 // ./library/JunDB.js
 
 import { JunDrive } from "./JunDrive.js";
+import { JunCodec, JunType, JunShard } from "./JunShard.js";
 import { JunHub } from "./core/JunHub.js";
 import { JunMap } from "./core/JunMap.js";
 
@@ -34,35 +35,34 @@ export class JunDB {
                 ? true : options.atomic
         });
 
-        this.map = new JunMap(
-            this.JunDrive, 'root.map.bin', {
+        this.map = new JunMap(this.JunDrive, 'root.map.bin', {
             file: {
                 limit: options.maps?.threshold || 10,
                 delay: options.maps?.debounce || 5000
             }
         })
 
-        this.proxies = new WeakMap();
-        this.data = this.Proxy(
-            this.map);
-
+        this.nodes = new WeakMap();
+        this.data = this.Proxy(this.map);
         this.shared = {}
     }
 
     memory() {
         return {
             maps: this.JunDrive.mapsRam.stats(),
-            nodes: this.JunDrive.nodesRam.stats(),
-            flow: this.JunDrive.flowRam.stats()
+            nodes: this.JunDrive.nodesRam.stats()
         }
     }
 
-    flush() {
-        return this.JunDrive
-            .flush()
+    prune() {
+        return this.JunDrive.prune()
     }
 
-    open(...path) {
+    flush() {
+        return this.JunDrive.flush()
+    }
+
+    go(...path) {
         if (!path.length) return;
         let a0 = this.map.data;
 
@@ -96,13 +96,22 @@ export class JunDB {
 
     Proxy(map) {
         if (!map?.data) return;
-
         const a0 = map.data;
-        if (this.proxies.has(a0))
-            return this.proxies.get(a0);
+        if (this.nodes.has(a0)) {
+            const node = this.nodes.get(a0)
+            if (node?.proxy) return node.proxy
+        }
+
+        this.nodes.set(a0, {
+            proxy: null,
+            nodeFunctions: {},
+            proxyMethods: {}
+        })
+
+        const node = this.nodes.get(a0);
 
         const Jun = this
-        const root = new JunHub(this.JunDrive, map, {
+        const hub = new JunHub(this.JunDrive, map, {
             shard: { depth: this.#options?.depth || 2 },
             file: {
                 limit: this.#options?.nodes?.threshold || 10,
@@ -113,110 +122,155 @@ export class JunDB {
 
         ////////////////////////////
 
-        const open = (...args) => {
-            const _map = this.open(...args, map);
+        const go = (...args) => {
+            const _map = this.go(...args, map);
             if (_map && _map.$file) return this.Proxy(_map)
         }
 
-        const guard = (method) => (...args) => {
-            const flow = root.JunFlow.proxy.get(method)
+        const InterceptMap = {
+            get: '$proxyMethodGet',
+            set: '$proxyMethodSet',
+            delete: '$proxyMethodDelete'
+        }
 
-            if (flow && typeof flow === 'function') {
+        const proxyMethods = (method) => (o = {}) => {
+            const getMethod = hub.get(InterceptMap[method]);
+
+            if (JunCodec.is(getMethod)) {
+                const { receiver, key, value, target } = o;
+                node.proxyMethods[method] ||= new Function(
+                    `return ${JunCodec.decode(getMethod)[2]}`)();
                 let control = { end: false, value: null, error: null };
-                const receiver = (method === 'delete') ? null
-                    : args[args.length - 1];
 
-                flow.apply({
+                node.proxyMethods[method].apply({
                     resolve: (value) => { control.end = true; control.value = value },
                     reject: (error) => { control.end = true; control.error = error },
-                    open: (...args) => open(...args),
-                    data: receiver, map,
-                }, args);
-
-                return control
+                    go: (...args) => go(...args), data: receiver, hub: hub, ...o
+                }, [target, key, value ?? receiver, receiver])
+                return control;
             }
         }
 
         const proxy = new Proxy({}, {
             get(target, key, receiver) {
-                if (typeof key === 'symbol')
-                    return Reflect.get(target, key);
+                if (typeof key === 'symbol') return Reflect.get(target, key);
 
-                if (key === '$call') return root.JunFlow.call
-                if (key === '$proxy') return root.JunFlow.proxy
+                /* if (key === '$file') return {
+                     files: () => { },
+ 
+                     read: () => { },
+                     write: (data) => { },
+                     remove: () => { },
+ 
+                     writeStream: (data) => { },
+                     readStream: () => { },
+                 }*/
 
-                const flow = root.JunFlow.call.get(key)
+                if (key === '$proxy') return {
+                    define: (a0, a1) => {
+                        if (JunShard.isObject(a0)) {
+                            const typeKeys = Object
+                                .keys(InterceptMap);
 
-                // flow
-                if (flow && typeof flow === 'function') {
-                    return (...args) => flow.apply({
-                        data: receiver, index: map, flow: flow,
-                        open: (...args) => open(...args),
-                        Jun: Jun
-                    }, args);
-                }
-
-
-                if (Jun.shared[key]) {
-                    const fun = Jun.shared[key];
-                    if (typeof fun === 'function') {
-                        return (...args) => fun.apply({
-                            data: receiver, index: map, flow: flow,
-                            open: (...args) => open(...args),
-                            Jun: Jun
-                        }, args);
+                            for (const key in a0) {
+                                if (!typeKeys.includes(key)) continue
+                                if (typeof a0[key] !== 'function') continue;
+                                node.proxyMethods[key] = a0[key];
+                                hub.set(InterceptMap[key], a0[key])
+                            }
+                        } else if (a0 && (typeof a1 === 'function')) {
+                            if (!InterceptMap[a0]) return false;
+                            node.proxyMethods[a0] = a1;
+                            hub.set(InterceptMap[a0], a1)
+                        } else return false;
+                    },
+                    remove: (key) => {
+                        if (typeof key == 'string') {
+                            if (!InterceptMap[key]) return false;
+                            delete node.proxyMethods[key]
+                            hub.delete(InterceptMap[key])
+                            return true;
+                        } else if (key === undefined) {
+                            for (const key in InterceptMap) {
+                                if (!InterceptMap[key]) continue
+                                hub.delete(InterceptMap[key])
+                                delete node.proxyMethods[key]
+                            }
+                            return true;
+                        }
                     }
                 }
 
-                const r = guard('get')(
-                    target, key, receiver);
+                const a0 = proxyMethods('get')({ target, key, receiver })
+                if (a0?.end && a0?.error) throw a0.error;
+                if (a0?.end) return a0.value;
 
-                if (r?.end && r?.error) throw r.error;
-                if (r?.end) return r.value;
+                const value = hub.get(key);
+                if (!JunCodec.is(value)) return value;
 
-                // ////////////////////////////
-
-                const rootGet = root.get(key);
-
-                if (typeof rootGet === 'string'
-                    && rootGet.startsWith('node:')) {
-                    const node = new JunMap(Jun.JunDrive,
-                        rootGet.replace('node:', '').replace(
-                            '.node.bin', '.map.bin'));
-                    return Jun.Proxy(node);
-                } else {
-                    return rootGet;
+                // FUNCTION
+                if (value[1] === JunType.FUNCTION) {
+                    node.nodeFunctions[key] ||= (new Function(
+                        `return ${JunCodec.decode(value)?.[2]}`)())
+                    return (...args) => node.nodeFunctions[key].apply({
+                        data: receiver, hub: hub, go: (...args) =>
+                            go(...args), ...{ target, key }
+                    }, args)
                 }
+
+                // NODE
+                else if (value[1] === JunType.NODE) {
+                    const data = JunCodec.decode(value);
+                    const node = new JunMap(
+                        Jun.JunDrive, data[2]);
+                    return Jun.Proxy(node);
+                } else return value;
+
             },
             set(target, key, value, receiver) {
-                const r = guard('set')(
-                    target, key, value, receiver);
-                if (r?.end && r?.error) throw r.error;
-                root.set(key, (r?.end) ? r.value : value);
+                const a0 = proxyMethods('set')(
+                    { target, key, value, receiver })
+                if (a0?.end && a0?.error) throw a0.error;
+                value = (a0?.end) ? a0.value : value;
+
+                if ((Object.values(
+                    InterceptMap).includes(key))
+                    && typeof value === 'function') {
+                    node.proxyMethods[key] = value;
+                } else if (typeof value === 'function') {
+                    node.nodeFunctions[key] = value;
+                }
+
+                hub.set(key, value);
                 return true;
             },
             deleteProperty(target, key) {
-                const r = guard('delete')(target, key);
-                if (r?.end && r?.error) throw r.error;
-                if (r?.end) return r.value;
-                root.delete(key);
+                const a0 = proxyMethods('delete')({ target, key })
+                if (a0?.end && a0?.error) throw a0.error;
+                if (a0?.end) return a0.value;
+
+                if (node.proxyMethods?.[key]) {
+                    delete node.proxyMethods[key]
+                } else if (node.nodeFunctions?.[key]) {
+                    delete node.nodeFunctions[key]
+                }
+
+                hub.delete(key);
                 return true;
             },
             ownKeys(target) {
-                return root.keys();
+                return hub.keys();
             },
-
             getOwnPropertyDescriptor(_, key) {
                 return {
                     enumerable: true,
                     configurable: true,
-                    value: root.get(key)
+                    value: hub.get(key)
                 };
             }
         })
 
-        this.proxies.set(
-            a0, proxy);
+        node.proxy = proxy
         return proxy;
     }
 }

@@ -19,26 +19,20 @@ export class JunDrive {
         this.syncIO = new SyncIO(options.folder, options.atomic);
         this.asyncIO = new AsyncIO(options.folder, options.atomic);
 
-        this.flowRam = new JunRAM(options // memory 2%
-            .memory * 0.02, ['root.flow.bin']);
-
         this.mapsRam = new JunRAM(options // memory 10%
             .memory * 0.10, ['root.map.bin']);
 
-        this.nodesRam = new JunRAM(options // memory 88% 
-            .memory * 0.88, ['root.node.bin']);
+        this.nodesRam = new JunRAM(options // memory 90% 
+            .memory * 0.90, ['root.node.bin']);
 
         if (!options.folder) options.folder = './data';
 
         this.basePath = path.resolve(options.folder);
         this.mapsPath = path.join(this.basePath, 'maps');
         this.nodesPath = path.join(this.basePath, 'nodes');
-        this.flowPath = path.join(this.basePath, 'flows');
 
-        const folders = [
-            this.basePath, this.mapsPath,
-            this.nodesPath, this.flowPath
-        ]
+        const folders = [this.basePath,
+        this.mapsPath, this.nodesPath]
 
         folders.forEach(dir => {
             if (!fs.existsSync(dir))
@@ -49,13 +43,7 @@ export class JunDrive {
     }
 
     #a0(filename) {
-        if (filename?.endsWith('flow.bin')) return {
-            path: this.flowRam.pinnedKeys.has(filename)
-                ? path.join(this.basePath, filename)
-                : path.join(this.flowPath, filename),
-            ram: this.flowRam
-        }
-        else if (filename?.endsWith('map.bin')) return {
+        if (filename?.endsWith('map.bin')) return {
             path: this.mapsRam.pinnedKeys.has(filename)
                 ? path.join(this.basePath, filename)
                 : path.join(this.mapsPath, filename),
@@ -150,9 +138,6 @@ export class JunDrive {
                     !(await fsp.readdir(d)).length)
                     await fsp.rmdir(d).catch(() => null);
             };
-
-            if (fs.existsSync(this.flowPath))
-                await scan(this.flowPath);
             if (fs.existsSync(this.nodesPath))
                 await scan(this.nodesPath);
             if (fs.existsSync(this.mapsPath))

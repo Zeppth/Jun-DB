@@ -76,8 +76,10 @@ export class JunRAM {
         const mb = this.currentSize / (1024 * 1024);
 
         return {
-            used: mb < 0.01 ? `${kb.toFixed(2)} KB` : `${mb.toFixed(2)} MB`,
-            limit: (this.limit / (1024 * 1024)).toFixed(2) + " MB",
+            used: mb < 0.01 ? `${kb.toFixed(2)} KB`
+                : `${mb.toFixed(2)} MB`,
+            limit: (this.limit / (1024 * 1024))
+                .toFixed(2) + " MB",
             items: this.cache.size
         };
     }
