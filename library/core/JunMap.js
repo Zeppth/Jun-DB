@@ -7,12 +7,8 @@ export class JunMap {
         this.JunDrive = JunDrive;
 
         this.fileMap = file
-        this.fileFlow = this.fileMap.replace(
-            '.map.bin', '.flow.bin');
-            
         this.fileNode = this.fileMap.replace(
             '.map.bin', '.node.bin');
-
         this.file = new JunDoc(JunDrive, this.fileMap, {
             limit: options?.file?.limit || 10,
             delay: options.file?.delay || 5000
@@ -26,7 +22,6 @@ export class JunMap {
 
     set(key, value) {
         this.data[key] = value;
-
         this.file.save();
     }
 

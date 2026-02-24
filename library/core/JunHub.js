@@ -1,18 +1,16 @@
 // ./library/core/JunHub.js
 
-import { JunShard } from '../JunShard.js';
-import { JunFlow } from './JunFlow.js';
+import { JunShard, JunType } from '../JunShard.js';
 import { JunNode } from './JunNode.js';
+import { JunCodec } from '../JunShard.js';
 
 
 export class JunHub {
     constructor(JunDrive, JunMap, options = {}) {
         this.JunMap = JunMap
         this.JunDrive = JunDrive
-
-        this.JunFlow = new JunFlow(JunDrive, JunMap)
-        this.JunNode = new JunNode(JunDrive, JunMap, options)
-
+        this.JunNode = new JunNode(
+            JunDrive, JunMap, options)
         this.JunShard = new JunShard(
             JunDrive, JunMap, this.JunNode)
     }
@@ -24,11 +22,11 @@ export class JunHub {
     get(key) {
         const value = this.data[key];
 
-        if (typeof value === 'string'
-            && value.startsWith('node:')
-            && value.endsWith('.node.bin')
-            && this.JunMap.get(value)) {
-            this.JunMap.set(key, value);
+        if (JunCodec.is(value)
+            && value[1] === JunType.NODE) {
+            const data = JunCodec.decode(value);
+            if (!this.JunMap.get(key)) this
+                .JunMap.set(key, data[2]);
         }
 
         return value;
@@ -37,14 +35,13 @@ export class JunHub {
     set(key, value) {
         if (this.JunMap.get(key))
             this.delete(key);
-
         if (JunShard.isObject(value)) {
             this.JunShard.forge({ [key]: value },
                 this.JunMap, this.JunNode);
-        } else {
-            this.data[key] = value;
-            this.JunNode.file.save();
-        }
+        } else if (typeof value === 'function') {
+            this.data[key] = JunCodec.encode(2, value);
+        } else this.data[key] = value;
+        this.JunNode.file.save();
     }
 
     delete(key) {
