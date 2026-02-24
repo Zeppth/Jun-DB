@@ -1,7 +1,7 @@
 {
   "name": "jun-db",
-  "version": "2.0.0",
-  "description": "Minimalist NoSQL sharded database for Node.js. High-performance binary storage that feels like a native JS object via transparent Proxies. Zero dependencies and atomic I/O.",
+  "version": "3.0.0",
+  "description": "Transparent JavaScript object persistence using Proxies and binary storage. Features automatic sharding, atomic I/O, and LRU caching with zero dependencies.",
   "main": "index.js",
   "type": "module",
   "files": [
@@ -23,7 +23,6 @@
     "binary-storage",
     "zero-dependency",
     "atomic-writes",
-    "high-performance",
     "lru-cache"
   ],
   "author": "Zeppth",

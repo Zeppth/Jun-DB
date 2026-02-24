@@ -56,13 +56,12 @@ const db = new JunDB({
 
 ### Memory Budget Distribution
 
-The configured `memory` value is split internally across three separate LRU caches:
+The configured `memory` value is split internally across two separate LRU caches:
 
 | Cache       | Share | Purpose                                    |
 |-------------|-------|--------------------------------------------|
-| `nodesRam`  | 88%   | Data nodes (actual stored values)          |
 | `mapsRam`   | 10%   | Structure maps (pointers between nodes)    |
-| `flowRam`   |  2%   | Flow definitions (`$proxy` and `$call`)    |
+| `nodesRam`  | 90%   | Data nodes (actual stored values)          |
 
 The LRU cache (`JunRAM`) tracks size in serialized bytes, not key count. When the budget for a cache segment is exceeded, the least recently used entries are evicted. Pinned keys (the root files) are never evicted.
 
@@ -83,11 +82,18 @@ delete db.data.users.admin;
 
 When you assign a plain object to a key, the system recursively decomposes it into shards (see below). When you read a key that points to a shard, the system loads and proxies it transparently.
 
+Standard iteration and enumeration work as expected:
+
+```javascript
+Object.keys(db.data.users);       // returns all keys in the node
+for (const key in db.data.users) { /* ... */ }
+```
+
 ### 2. Recursive Sharding
 
 When a plain object is assigned, `JunShard.forge` walks the object recursively. Every nested plain object becomes an independent shard: a pair of binary files (a map and a node) stored under a randomly generated ID with a directory prefix determined by `depth`.
 
-The parent node stores a lightweight pointer string (`node:<id>.node.bin`) instead of the actual data. The parent map stores the corresponding map file path. On read, the proxy intercepts the access, resolves the pointer, loads only the required shard, and returns a new proxy over it.
+The parent node stores a lightweight encoded pointer (a `JunCodec` array with type `NODE`) instead of the actual data. The parent map stores the corresponding map file path. On read, the proxy intercepts the access, resolves the pointer, loads only the required shard, and returns a new proxy over it.
 
 **Physical structure for `depth: 2` and a generated ID of `A3F7BC01`:**
 
@@ -98,16 +104,13 @@ data/
 ├── maps/
 │   └── A3/
 │       └── A3F7BC01.map.bin
-├── nodes/
-│   └── A3/
-│       └── A3F7BC01.node.bin
-└── flows/
-    └── ...             # Flow definitions (if any)
+└── nodes/
+    └── A3/
+        └── A3F7BC01.node.bin
 ```
 
 - `.map.bin` files contain structure: keys mapped to child map file paths, plus a `$file` self-reference.
-- `.node.bin` files contain the terminal data: primitives, arrays, dates, and pointer strings to child shards.
-- `.flow.bin` files store serialized function strings for `$proxy` and `$call` definitions.
+- `.node.bin` files contain the terminal data: primitives, arrays, dates, encoded pointers to child shards, and encoded function strings.
 
 The `depth` parameter controls directory fan-out. A depth of 2 means the first 2 characters of the hex ID form a subdirectory. This prevents any single directory from accumulating too many files.
 
@@ -117,7 +120,7 @@ All data is serialized and deserialized using Node.js's built-in `v8.serialize` 
 
 **Supported types:** primitives, plain Objects, Arrays, Date, RegExp, Map, Set, Buffer, TypedArrays, and other types supported by the [structured clone algorithm](https://developer.mozilla.org/en-US/docs/Web/API/Web_Workers_API/Structured_clone_algorithm).
 
-**Not supported:** functions (except through the Flow system as stringified source), Promises, WeakMap, WeakSet, Symbols, and any host objects (Sockets, Streams, etc.).
+**Not supported:** functions (except through the automatic encoding system described below), Promises, WeakMap, WeakSet, Symbols, and any host objects (Sockets, Streams, etc.).
 
 ### 4. Write Strategy (JunDoc)
 
@@ -144,43 +147,79 @@ The async I/O layer (`AsyncIO`) also provides:
 - **Global concurrency limit:** at most 64 concurrent I/O operations, with backpressure for anything beyond that.
 - **Retry logic:** transient errors (`ENOENT`, `EMFILE`) are retried up to 3 times with a short delay.
 
-### 6. Object Identity via `open()`
+### 6. Navigation with `go()`
 
-The `db.data` proxy gives you transparent traversal, but each nested access creates a new proxy. If you need to work with a specific subtree repeatedly, `open()` returns a proxy bound to a specific map node:
+The `db.data` proxy gives you transparent traversal, but each nested access creates a new proxy. If you need to work with a specific subtree repeatedly, `go()` resolves a path through the map hierarchy once and returns a proxy bound to that node:
 
 ```javascript
-const users = db.open('users');
+const users = db.go('users');
 
 // Equivalent to db.data.users.admin, but 'users' is resolved once.
 users.admin = { id: 1, role: 'root' };
 console.log(users.admin.role);
 ```
 
-`open()` accepts a variable number of string arguments representing a path through the map hierarchy:
+`go()` accepts a variable number of string arguments representing a path through the map hierarchy:
 
 ```javascript
-const adminSettings = db.open('users', 'admin', 'settings');
+const adminSettings = db.go('users', 'admin', 'settings');
 ```
 
-It returns `false` if any segment of the path does not exist.
+It returns `false` if any segment of the path does not exist or does not point to a valid map file.
 
-## Flow Control System
+## Function Persistence
 
-Jun-DB exposes two special properties on every proxied node: `$proxy` and `$call`. These allow injecting custom logic (interceptors and methods) into the data graph. Flow definitions are persisted to `.flow.bin` files; functions are stored as source strings and reconstructed via the `Function` constructor upon loading.
+Functions assigned to a proxied node are automatically encoded and persisted to disk. The function's source string is serialized via `JunCodec` (base64-encoded) and stored in the node file. On read, the source is reconstructed using the `Function` constructor.
 
-### Interceptors (`$proxy`)
+```javascript
+db.data.users.findByRole = function (role) {
+    // 'this' provides:
+    //   this.data   - the proxy for the current node
+    //   this.hub    - the JunHub instance managing this node
+    //   this.go     - function to navigate sub-paths relative to this node
+    //   this.target - the proxy target object
+    //   this.key    - the property name ('findByRole')
 
-Intercept `get`, `set`, and `delete` operations on a specific node. Useful for validation, transformation, or side effects.
+    const results = [];
+    for (const key of Object.keys(this.data)) {
+        const user = this.data[key];
+        if (user && user.role === role) {
+            results.push(user);
+        }
+    }
+    return results;
+};
+
+// Usage — called like any normal method:
+const admins = db.data.users.findByRole('root');
+
+// Remove the function:
+delete db.data.users.findByRole;
+```
+
+Because functions are stored as source strings, they **cannot close over external variables**. The function body must be self-contained; only `this` (with the properties listed above) and the function's own arguments are available at execution time.
+
+## Proxy Interceptors (`$proxy`)
+
+Every proxied node exposes a `$proxy` property for defining interceptors on `get`, `set`, and `delete` operations. Interceptors are persisted to disk alongside node data, so they survive restarts.
+
+### Defining Interceptors
+
+Pass an object with `get`, `set`, and/or `delete` keys:
 
 ```javascript
 db.data.users.$proxy.define({
     set(target, key, value, receiver) {
         // 'this' provides:
-        //   this.data     - the receiver proxy
-        //   this.map      - the JunMap instance for this node
-        //   this.resolve  - call to stop propagation and set a return value
-        //   this.reject   - call to stop propagation and throw an error
-        //   this.open     - function to open sub-paths
+        //   this.resolve(val) - stop propagation, use val as the final value
+        //   this.reject(err)  - stop propagation, throw err
+        //   this.go(...args)  - navigate sub-paths relative to this node
+        //   this.data         - the receiver proxy
+        //   this.hub          - the JunHub instance
+        //   this.target       - the proxy target object
+        //   this.key          - the property key
+        //   this.value        - the value being set
+        //   this.receiver     - the receiver proxy
 
         if (key === 'age' && typeof value !== 'number') {
             this.reject(new Error('age must be a number'));
@@ -197,7 +236,6 @@ db.data.users.$proxy.define({
     },
 
     get(target, key, receiver) {
-        // Can intercept reads too.
         // Call this.resolve(val) to return a custom value.
         // Call this.reject(err) to throw.
         // Do nothing to let the default behavior run.
@@ -207,61 +245,38 @@ db.data.users.$proxy.define({
         // Same pattern.
     }
 });
+```
 
+You can also define a single interceptor:
+
+```javascript
+db.data.users.$proxy.define('set', function (target, key, value, receiver) {
+    // ...
+});
+```
+
+### Removing Interceptors
+
+```javascript
 // Remove a specific interceptor:
 db.data.users.$proxy.remove('set');
+
+// Remove all interceptors from this node:
+db.data.users.$proxy.remove();
 ```
 
-### Custom Methods (`$call`)
+### Interceptor Behavior
 
-Attach callable functions to a data node. These are accessible as regular properties on the proxy.
+When an interceptor calls `this.resolve(value)`:
+- **On `set`:** the resolved value replaces the original value for storage.
+- **On `get`:** the resolved value is returned to the caller instead of the stored value.
+- **On `delete`:** the resolved value is returned as the result of the `delete` expression.
 
-```javascript
-db.data.users.$call.define({
-    findByRole(role) {
-        // 'this' provides:
-        //   this.data  - the proxy for the current node
-        //   this.index - the JunMap instance
-        //   this.flow  - the full call flow object
-        //   this.open  - function to open sub-paths
-        //   this.Jun   - the JunDB instance
+When an interceptor calls `this.reject(error)`, the error is thrown at the call site.
 
-        const results = [];
-        for (const key of Object.keys(this.data)) {
-            const user = this.data[key];
-            if (user && user.role === role) {
-                results.push(user);
-            }
-        }
-        return results;
-    }
-});
+If neither `resolve` nor `reject` is called, the operation proceeds with its default behavior.
 
-// Usage:
-const admins = db.data.users.findByRole('root');
-
-// Remove a specific method:
-db.data.users.$call.remove('findByRole');
-```
-
-### Shared Methods
-
-The `db.shared` object allows defining methods that are available on every proxied node, without storing anything per-node:
-
-```javascript
-db.shared.toJSON = function () {
-    const out = {};
-    for (const key of Object.keys(this.data)) {
-        out[key] = this.data[key];
-    }
-    return out;
-};
-
-// Now available on any node:
-const snapshot = db.data.users.toJSON();
-```
-
-Shared methods receive the same `this` context as `$call` methods.
+Interceptors, like persisted functions, are stored as source strings and reconstructed via the `Function` constructor. They cannot close over external variables.
 
 ## Lifecycle and Shutdown
 
@@ -281,10 +296,10 @@ process.on('SIGINT', async () => {
 After extensive deletions, the shard directory tree may contain empty folders. Call `prune()` to clean them up:
 
 ```javascript
-await db.JunDrive.prune();
+await db.prune();
 ```
 
-This walks the `maps/`, `nodes/`, and `flows/` directories and removes any empty subdirectories.
+This walks the `maps/` and `nodes/` directories and removes any empty subdirectories.
 
 ## Memory Inspection
 
@@ -294,8 +309,7 @@ const stats = db.memory();
 // Returns:
 // {
 //   maps:  { used: '0.12 MB', limit: '5.00 MB', items: 14 },
-//   nodes: { used: '3.40 MB', limit: '44.00 MB', items: 230 },
-//   flow:  { used: '0.00 KB', limit: '1.00 MB', items: 0 }
+//   nodes: { used: '3.40 MB', limit: '45.00 MB', items: 230 }
 // }
 ```
 
@@ -307,12 +321,11 @@ const stats = db.memory();
 | `JunDrive` | Storage layer. Routes filenames to the correct subdirectory and LRU cache segment. Exposes sync and async read/write/remove/exists. |
 | `JunIO`    | `SyncIO` and `AsyncIO` classes. Handle actual filesystem operations, atomic write logic, concurrency limiting, and retry. |
 | `JunRAM`   | LRU cache sized by serialized byte count. Supports pinned keys that are never evicted. |
-| `JunShard` | Recursive decomposition (`forge`) and recursive deletion (`purge`) of object trees into independent file pairs. |
+| `JunShard` | Recursive decomposition (`forge`) and recursive deletion (`purge`) of object trees into independent file pairs. Also houses `JunType` constants and `JunCodec` encoding/decoding. |
 | `JunMap`   | Represents a structure map file. Holds key-to-child-map-path mappings. |
-| `JunNode`  | Represents a data node file. Holds terminal values and shard pointer strings. |
+| `JunNode`  | Represents a data node file. Holds terminal values, encoded shard pointers, and encoded function strings. |
 | `JunHub`   | Coordinates a map and its node. Routes `get`, `set`, `delete` through shard logic. |
 | `JunDoc`   | Write-back controller for a single file. Implements threshold + debounce flushing. |
-| `JunFlow`  | Manages `$proxy` and `$call` definitions. Stores functions as strings, reconstructs them on read. |
 
 ## Limitations and Caveats
 
@@ -328,9 +341,9 @@ Accessing a deeply nested path that is not cached requires loading each intermed
 
 Recursive sharding produces a large number of small binary files. Modern filesystems (ext4, APFS, NTFS) handle this without issue for typical workloads. It may affect backup tools or synchronization systems that enumerate files.
 
-### Function Storage via `eval`
+### Function Storage via `Function` Constructor
 
-Flow functions (`$proxy`, `$call`) are stored as stringified source and reconstructed with `eval`. This has the usual security implications: do not store or load flow definitions from untrusted sources.
+Persisted functions (both node methods and `$proxy` interceptors) are stored as stringified source and reconstructed with the `Function` constructor. This has the usual security implications: do not store or load function definitions from untrusted sources. Additionally, persisted functions cannot reference variables from their original closure scope.
 
 ### No Query Engine
 
