@@ -1,147 +1,62 @@
 // ./library/JunDrive.js
-
 import fs from 'fs';
-import fsp from 'fs/promises';
 import path from 'path';
-
+import v8 from 'v8';
+import { open } from 'lmdb';
 import { JunRAM } from './JunRAM.js';
-import { SyncIO, AsyncIO } from './JunIO.js';
 
 export class JunDrive {
     constructor(options = {}) {
-        if (options.constructor.name !== 'Object')
-            throw new Error('Invalid options');
-
         options.folder = options.folder || './data';
         options.memory = options.memory || 50;
-        options.atomic = options.atomic;
-
-        this.syncIO = new SyncIO(options.folder, options.atomic);
-        this.asyncIO = new AsyncIO(options.folder, options.atomic);
-
-        this.mapsRam = new JunRAM(options // memory 10%
-            .memory * 0.10, ['root.map.bin']);
-
-        this.nodesRam = new JunRAM(options // memory 90% 
-            .memory * 0.90, ['root.node.bin']);
-
-        if (!options.folder) options.folder = './data';
-
         this.basePath = path.resolve(options.folder);
-        this.mapsPath = path.join(this.basePath, 'maps');
-        this.nodesPath = path.join(this.basePath, 'nodes');
-
-        const folders = [this.basePath,
-        this.mapsPath, this.nodesPath]
-
-        folders.forEach(dir => {
-            if (!fs.existsSync(dir))
-                fs.mkdirSync(dir, {
-                    recursive: true
-                });
-        });
+        if (!fs.existsSync(this.basePath)) fs.mkdirSync(this.basePath, { recursive: true });
+        this.db = open({ path: this.basePath, compression: true, encoding: 'binary' });
+        this.mapsRam = new JunRAM(options.memory * 0.10, ['root.map.bin']);
+        this.nodesRam = new JunRAM(options.memory * 0.90, ['root.node.bin']);
     }
 
     #a0(filename) {
-        if (filename?.endsWith('map.bin')) return {
-            path: this.mapsRam.pinnedKeys.has(filename)
-                ? path.join(this.basePath, filename)
-                : path.join(this.mapsPath, filename),
-            ram: this.mapsRam
-        }
-        else if (filename?.endsWith('node.bin')) return {
-            path: this.nodesRam.pinnedKeys.has(filename)
-                ? path.join(this.basePath, filename)
-                : path.join(this.nodesPath, filename),
-            ram: this.nodesRam
-        }
-        else return new Error('Invalid filename');
+        if (filename?.endsWith('map.bin')) return this.mapsRam;
+        else if (filename?.endsWith('node.bin')) return this.nodesRam;
+        else throw new Error('Invalid filename');
     }
 
-    //////////////////////
-
-    readSync(filename) {
-        const { ram, path } = this.#a0(filename);
-        const cached = ram.get(filename);
-        if (cached) return cached;
-        const data = this.syncIO.read(path);
-        ram.set(filename, data);
-        return data;
-
-    }
+    #encode(data) { return v8.serialize(data); }
+    #decode(buffer) { return buffer ? v8.deserialize(buffer) : null; }
 
     writeSync(filename, data = {}) {
-        const { ram, path } = this.#a0(filename);
-        ram.set(filename, data);
-        this.syncIO.write(path, data);
+        const ram = this.#a0(filename);
+        const buffer = this.#encode(data);
+        ram.set(filename, data, buffer.length);
+        this.db.putSync(filename, buffer);
         return true;
     }
 
-    removeSync(filename) {
-        const { ram, path } = this.#a0(filename);
-        ram.delete(filename);
-        this.syncIO.remove(path);
+    async write(filename, data = {}) {
+        const ram = this.#a0(filename);
+        const buffer = this.#encode(data);
+        ram.set(filename, data, buffer.length);
+        await this.db.put(filename, buffer);
         return true;
     }
 
-
-    existsSync(filename) {
-        const { ram, path } = this.#a0(filename);
-        if (ram.has(filename)) return true;
-        return this.syncIO.exists(path);
-    }
-
-    //////////////////////
-
-    async read(filename) {
-        const { ram, path } = this.#a0(filename);
+    readSync(filename) {
+        const ram = this.#a0(filename);
         const cached = ram.get(filename);
         if (cached) return cached;
-        const data = await this.asyncIO.read(path);
-        ram.set(filename, data);
+        const buffer = this.db.getBinary(filename);
+        if (!buffer) return null;
+        const data = this.#decode(buffer);
+        ram.set(filename, data, buffer.length);
         return data;
     }
 
-    write(filename, data = {}) {
-        const { ram, path } = this.#a0(filename);
-        ram.set(filename, data);
-        return this.asyncIO.write(path, data);
-    }
-
-    remove(filename) {
-        const { ram, path } = this.#a0(filename);
-        ram.delete(filename);
-        return this.asyncIO.remove(path);
-    }
-
-    exists(filename) {
-        const { ram, path } = this.#a0(filename);
-        if (ram.has(filename)) return true;
-        return this.asyncIO.exists(path);
-    }
-
-    //////////////////////
-
-    async flush() {
-        return await this
-            .asyncIO.flush();
-    }
-
-    async prune() {
-        return this.asyncIO.queue('__maint__', async () => {
-            const scan = async (d) => {
-                const items = await fsp.readdir(d,
-                    { withFileTypes: true });
-                for (const i of items) if (i.isDirectory())
-                    await scan(path.join(d, i.name));
-                if (d !== this.nodesPath && d !== this.basePath &&
-                    !(await fsp.readdir(d)).length)
-                    await fsp.rmdir(d).catch(() => null);
-            };
-            if (fs.existsSync(this.nodesPath))
-                await scan(this.nodesPath);
-            if (fs.existsSync(this.mapsPath))
-                await scan(this.mapsPath);
-        });
-    }
+    async read(filename) { return this.readSync(filename); }
+    removeSync(key) { this.#a0(key).delete(key); this.db.removeSync(key); return true; }
+    async remove(key) { this.#a0(key).delete(key); await this.db.remove(key); return true; }
+    existsSync(key) { return this.#a0(key).has(key) || this.db.doesExist(key); }
+    async exists(key) { return this.existsSync(key); }
+    async flush() { return this.db.flushed; }
+    async prune() { return true; }
 }

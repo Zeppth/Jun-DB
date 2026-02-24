@@ -1,5 +1,4 @@
 // ./library/JunRAM.js
-
 import v8 from 'v8';
 
 export class JunRAM {
@@ -12,60 +11,47 @@ export class JunRAM {
     }
 
     #size(data) {
-        try {
-            return v8.serialize(data).length;
-        } catch (e) {
-            return 0;
-        }
+        try { return v8.serialize(data).length; }
+        catch (e) { return 0; }
     }
 
-    set(key, data) {
+    set(key, data, explicitSize = null) {
         if (this.pinnedKeys.has(key)) {
             this.pinned.set(key, data);
             return true;
         }
 
-        if (this.cache.has(key))
-            this.delete(key);
-
-        const dataSize = this.#size(data);
+        if (this.cache.has(key)) this.delete(key);
+        const dataSize = explicitSize !== null
+            ? explicitSize : this.#size(data);
         if (dataSize > this.limit) {
-            console.warn(`[JunDB] ${key} >  ${this
-                .limit / 1024 / 1024} MB`);
             return false;
         }
 
         while (this.currentSize + dataSize
             > this.limit && this.cache.size > 0) {
-            const oldestKey = this.cache
-                .keys().next().value;
+            const oldestKey = this.cache.keys().next().value;
             this.delete(oldestKey);
         }
-        this.cache.set(key,
-            { data, size: dataSize });
+
+        this.cache.set(key, { data, size: dataSize });
         this.currentSize += dataSize;
         return true;
     }
 
     get(key) {
-        if (this.pinned.has(key))
-            return this.pinned.get(key);
-
+        if (this.pinned.has(key)) return this.pinned.get(key);
         const item = this.cache.get(key);
         if (!item) return null;
-        const data = item.data;
         this.cache.delete(key);
         this.cache.set(key, item);
-        return data;
+        return item.data;
     }
 
     delete(key) {
-        if (this.pinned.has(key)) {
-            return this.pinned.delete(key);
-        }
-
+        if (this.pinned.has(key)) return this.pinned.delete(key);
         const item = this.cache.get(key);
-        if (!item) return false
+        if (!item) return false;
         this.currentSize -= item.size;
         this.cache.delete(key);
         return true;
@@ -74,18 +60,15 @@ export class JunRAM {
     stats() {
         const kb = this.currentSize / 1024;
         const mb = this.currentSize / (1024 * 1024);
-
         return {
-            used: mb < 0.01 ? `${kb.toFixed(2)} KB`
-                : `${mb.toFixed(2)} MB`,
-            limit: (this.limit / (1024 * 1024))
-                .toFixed(2) + " MB",
+            used: mb < 0.01 ? `${kb.toFixed(2)} KB` : `${mb.toFixed(2)} MB`,
+            limit: (this.limit / (1024 * 1024)).toFixed(2) + " MB",
             items: this.cache.size
         };
     }
 
     has(key) {
-        return this.pinned.has(key)
-            || this.cache.has(key);
+        return this.pinned.has(key) 
+        || this.cache.has(key);
     }
 }
